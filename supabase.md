@@ -176,9 +176,19 @@ with:
 {{ .RedirectTo }}/auth/confirm?token_hash={{ .TokenHash }}&type=email
 ```
 
-This is required for the SSR confirmation route to exchange the confirmation token correctly.
+This is required for the confirmation page to exchange the confirmation token correctly.
 
 Use `{{ .RedirectTo }}`, not `{{ .SiteURL }}`, when you want both localhost and Vercel production to work. `{{ .RedirectTo }}` uses the URL passed by the app during signup, so local signups can confirm through `http://localhost:3000` and production signups can confirm through your Vercel domain.
+
+If you are editing the full HTML email template, use this link target on the confirmation button:
+
+```html
+<a href="{{ .RedirectTo }}/auth/confirm?token_hash={{ .TokenHash }}&type=email">
+  Confirm your email
+</a>
+```
+
+The app shows a branded `/auth/confirm` status page. That page verifies the token through `/auth/confirm/verify`, stores the Supabase session cookies, and then shows a dashboard button when confirmation succeeds.
 
 ### 3.3 Important email note
 
