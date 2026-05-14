@@ -5,6 +5,7 @@ import "@fontsource/dm-sans/700.css";
 import "@fontsource/instrument-serif/400.css";
 
 import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -26,6 +27,7 @@ export default function RootLayout({
       <body>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
           {children}
+          <Toaster position="top-right" closeButton />
         </ThemeProvider>
       </body>
     </html>

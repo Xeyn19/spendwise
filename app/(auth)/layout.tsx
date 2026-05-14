@@ -1,10 +1,19 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { AuthShowcase } from "@/components/auth-showcase";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { createClient } from "@/lib/supabase/server";
 
-export default function AuthLayout({ children }: { children: ReactNode }) {
+export default async function AuthLayout({ children }: { children: ReactNode }) {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+
+  if (claimsData?.claims?.sub) {
+    redirect("/dashboard");
+  }
+
   return (
     <main className="relative min-h-svh overflow-hidden">
       <div className="pointer-events-none absolute inset-0">

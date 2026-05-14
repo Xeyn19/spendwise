@@ -2,8 +2,13 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useActionState } from "react";
 import { Eye, EyeOff, LockKeyhole, Mail, UserRound } from "lucide-react";
+import { useFormStatus } from "react-dom";
+import { toast } from "sonner";
 
+import { initialAuthActionState } from "@/app/(auth)/auth-action-state";
+import { registerAction } from "@/app/(auth)/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,16 +24,45 @@ type Errors = {
   terms?: string;
 };
 
+function SubmitButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <Button type="submit" className="w-full rounded-2xl" disabled={pending}>
+      {pending ? "Creating account..." : "Create account"}
+    </Button>
+  );
+}
+
 export function RegisterForm() {
   const [showPassword, setShowPassword] = React.useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
   const [errors, setErrors] = React.useState<Errors>({});
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [submitted, setSubmitted] = React.useState(false);
+  const [state, formAction] = useActionState(registerAction, initialAuthActionState);
+  const lastToastKeyRef = React.useRef<string | null>(null);
+
+  React.useEffect(() => {
+    if (!state.message) {
+      return;
+    }
+
+    const toastKey = `${state.success}:${state.message}`;
+
+    if (lastToastKeyRef.current === toastKey) {
+      return;
+    }
+
+    lastToastKeyRef.current = toastKey;
+
+    if (state.success) {
+      toast.success(state.message);
+      return;
+    }
+
+    toast.error(state.message);
+  }, [state.message, state.success]);
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
     const formData = new FormData(event.currentTarget);
     const firstName = String(formData.get("firstName") ?? "").trim();
     const lastName = String(formData.get("lastName") ?? "").trim();
@@ -58,19 +92,12 @@ export function RegisterForm() {
     if (!terms) nextErrors.terms = "You must accept the terms to continue.";
 
     setErrors(nextErrors);
-    setSubmitted(false);
 
     if (Object.keys(nextErrors).length > 0) {
+      event.preventDefault();
+      toast.error("Fix the highlighted registration fields and try again.");
       return;
     }
-
-    setIsSubmitting(true);
-    window.setTimeout(() => {
-      React.startTransition(() => {
-        setIsSubmitting(false);
-        setSubmitted(true);
-      });
-    }, 1000);
   }
 
   return (
@@ -82,7 +109,7 @@ export function RegisterForm() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+        <form className="space-y-5" action={formAction} onSubmit={handleSubmit} noValidate>
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="register-first-name">First name</Label>
@@ -159,15 +186,13 @@ export function RegisterForm() {
               <span className="space-y-1 text-sm text-muted-foreground">
                 <span className="block font-medium text-foreground">Agree to the terms</span>
                 <span>
-                  I understand this is a UI-only prototype and no real account will be created yet.
+                  I agree to create a real SpendWise account and receive a confirmation email to activate it.
                 </span>
               </span>
             </label>
             {errors.terms ? <p className="text-sm text-destructive">{errors.terms}</p> : null}
           </div>
-          <Button type="submit" className="w-full rounded-2xl" disabled={isSubmitting}>
-            {isSubmitting ? "Creating account..." : "Create account"}
-          </Button>
+          <SubmitButton />
         </form>
         <div className="flex flex-col gap-2 rounded-[1.4rem] border border-border/70 bg-muted/55 p-4 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between dark:bg-background/35">
           <span>Already have an account?</span>
@@ -175,9 +200,9 @@ export function RegisterForm() {
             Sign in instead
           </Link>
         </div>
-        {submitted ? (
+        {state.message ? (
           <div className="rounded-[1.4rem] border border-primary/15 bg-primary/10 p-4 text-sm text-primary">
-            Mock registration complete. The backend auth flow is deferred for now.
+            {state.message}
           </div>
         ) : null}
       </CardContent>

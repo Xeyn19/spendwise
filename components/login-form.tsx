@@ -2,8 +2,13 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useActionState } from "react";
 import { Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
+import { useFormStatus } from "react-dom";
+import { toast } from "sonner";
 
+import { initialAuthActionState } from "@/app/(auth)/auth-action-state";
+import { loginAction } from "@/app/(auth)/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,6 +19,16 @@ type Errors = {
   email?: string;
   password?: string;
 };
+
+function SubmitButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <Button type="submit" className="w-full rounded-2xl" disabled={pending}>
+      {pending ? "Signing in..." : "Sign in"}
+    </Button>
+  );
+}
 
 function GoogleMark() {
   return (
@@ -41,12 +56,31 @@ function GoogleMark() {
 export function LoginForm() {
   const [showPassword, setShowPassword] = React.useState(false);
   const [errors, setErrors] = React.useState<Errors>({});
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [submitted, setSubmitted] = React.useState(false);
+  const [state, formAction] = useActionState(loginAction, initialAuthActionState);
+  const lastToastKeyRef = React.useRef<string | null>(null);
+
+  React.useEffect(() => {
+    if (!state.message) {
+      return;
+    }
+
+    const toastKey = `${state.success}:${state.message}`;
+
+    if (lastToastKeyRef.current === toastKey) {
+      return;
+    }
+
+    lastToastKeyRef.current = toastKey;
+
+    if (state.success) {
+      toast.success(state.message);
+      return;
+    }
+
+    toast.error(state.message);
+  }, [state.message, state.success]);
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
     const formData = new FormData(event.currentTarget);
     const email = String(formData.get("email") ?? "").trim();
     const password = String(formData.get("password") ?? "");
@@ -63,19 +97,12 @@ export function LoginForm() {
     }
 
     setErrors(nextErrors);
-    setSubmitted(false);
 
     if (Object.keys(nextErrors).length > 0) {
+      event.preventDefault();
+      toast.error("Fix the highlighted login fields and try again.");
       return;
     }
-
-    setIsSubmitting(true);
-    window.setTimeout(() => {
-      React.startTransition(() => {
-        setIsSubmitting(false);
-        setSubmitted(true);
-      });
-    }, 900);
   }
 
   return (
@@ -87,16 +114,22 @@ export function LoginForm() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <Button type="button" variant="outline" className="w-full justify-center rounded-2xl">
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full justify-center rounded-2xl"
+          disabled
+          aria-disabled="true"
+        >
           <GoogleMark />
-          Continue with Google
+          Google OAuth coming later
         </Button>
         <div className="flex items-center gap-3">
           <Separator className="flex-1" />
           <span className="text-xs uppercase tracking-[0.24em] text-muted-foreground">or</span>
           <Separator className="flex-1" />
         </div>
-        <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+        <form className="space-y-5" action={formAction} onSubmit={handleSubmit} noValidate>
           <div className="space-y-2">
             <Label htmlFor="login-email">Email</Label>
             <div className="relative">
@@ -132,16 +165,14 @@ export function LoginForm() {
             </div>
             {errors.password ? <p className="text-sm text-destructive">{errors.password}</p> : null}
           </div>
-          <Button type="submit" className="w-full rounded-2xl" disabled={isSubmitting}>
-            {isSubmitting ? "Signing in..." : "Sign in"}
-          </Button>
+          <SubmitButton />
         </form>
         <div className="space-y-2 rounded-[1.4rem] border border-primary/15 bg-primary/10 p-4">
-          <p className="text-sm font-medium text-primary">UI-only demo flow</p>
+          <p className="text-sm font-medium text-primary">Email/password is live</p>
           <p className="text-sm text-muted-foreground">
-            Google OAuth and real authentication are intentionally deferred in this pass.
+            Sign in now uses Supabase. Google OAuth stays visible but is not wired yet.
           </p>
-          {submitted ? <p className="text-sm text-primary">Mock sign-in successful.</p> : null}
+          {state.message ? <p className="text-sm text-primary">{state.message}</p> : null}
         </div>
       </CardContent>
     </Card>
