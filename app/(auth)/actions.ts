@@ -27,6 +27,10 @@ function getBaseUrl(headerStore: Awaited<ReturnType<typeof headers>>) {
 function mapAuthError(message: string) {
   const normalizedMessage = message.toLowerCase();
 
+  if (normalizedMessage.includes("rate limit")) {
+    return "Supabase is temporarily rate-limiting signup emails. Wait a few minutes, then try again.";
+  }
+
   if (normalizedMessage.includes("email not confirmed")) {
     return "Confirm your email before signing in.";
   }
@@ -46,24 +50,37 @@ export async function registerAction(
   _previousState: AuthActionState,
   formData: FormData
 ): Promise<AuthActionState> {
-  const supabase = await createClient();
-  const headerStore = await headers();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
   const firstName = String(formData.get("firstName") ?? "").trim();
   const lastName = String(formData.get("lastName") ?? "").trim();
 
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      emailRedirectTo: getBaseUrl(headerStore),
-      data: {
-        first_name: firstName,
-        last_name: lastName,
+  let signUpResult: Awaited<ReturnType<Awaited<ReturnType<typeof createClient>>["auth"]["signUp"]>>;
+
+  try {
+    const supabase = await createClient();
+    const headerStore = await headers();
+
+    signUpResult = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: getBaseUrl(headerStore),
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+        },
       },
-    },
-  });
+    });
+  } catch {
+    return {
+      success: false,
+      message:
+        "Could not reach Supabase from the server. Check the production Supabase environment variables and try again.",
+    };
+  }
+
+  const { data, error } = signUpResult;
 
   if (error) {
     return {
@@ -106,5 +123,5 @@ export async function loginAction(
   }
 
   revalidatePath("/", "layout");
-  redirect("/dashboard");
+  redirect("/dashboard?login=success");
 }

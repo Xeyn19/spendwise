@@ -5,15 +5,20 @@ import { createClient } from "@/lib/supabase/server";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
-  const { data: claimsData } = await supabase.auth.getClaims();
-
-  if (claimsData?.claims) {
-    await supabase.auth.signOut();
-  }
+  await supabase.auth.signOut();
 
   revalidatePath("/", "layout");
 
-  return NextResponse.redirect(new URL("/login", request.url), {
-    status: 302,
+  const response = NextResponse.redirect(new URL("/login?logout=success", request.url), {
+    status: 303,
   });
+
+  response.cookies.set("spendwise_logout", "success", {
+    path: "/",
+    maxAge: 60,
+    sameSite: "lax",
+    secure: request.nextUrl.protocol === "https:",
+  });
+
+  return response;
 }

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useActionState } from "react";
 import { Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
 import { useFormStatus } from "react-dom";
@@ -53,11 +54,29 @@ function GoogleMark() {
   );
 }
 
-export function LoginForm() {
+export function LoginForm({ logoutSuccess = false }: { logoutSuccess?: boolean }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [showPassword, setShowPassword] = React.useState(false);
   const [errors, setErrors] = React.useState<Errors>({});
   const [state, formAction] = useActionState(loginAction, initialAuthActionState);
   const lastToastKeyRef = React.useRef<string | null>(null);
+  const logoutToastShownRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!logoutSuccess && searchParams.get("logout") !== "success") {
+      return;
+    }
+
+    if (logoutToastShownRef.current) {
+      return;
+    }
+
+    logoutToastShownRef.current = true;
+    toast.success("You have been logged out successfully.");
+    document.cookie = "spendwise_logout=; Max-Age=0; path=/; SameSite=Lax";
+    router.replace("/login", { scroll: false });
+  });
 
   React.useEffect(() => {
     if (!state.message) {
