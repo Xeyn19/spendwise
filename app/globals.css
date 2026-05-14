@@ -1,26 +1,109 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-dm-sans);
+  --font-display: var(--font-instrument-serif);
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 6px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  --font-dm-sans: "DM Sans";
+  --font-instrument-serif: "Instrument Serif";
+  --radius: 1.5rem;
+  --background: #f4f8f7;
+  --foreground: #0d1822;
+  --card: rgba(255, 255, 255, 0.82);
+  --card-foreground: #0d1822;
+  --popover: #ffffff;
+  --popover-foreground: #0d1822;
+  --primary: #17b26a;
+  --primary-foreground: #04110b;
+  --secondary: #dbe8e5;
+  --secondary-foreground: #10212c;
+  --muted: #e7efee;
+  --muted-foreground: #5f7385;
+  --accent: #dce9f6;
+  --accent-foreground: #10212c;
+  --destructive: #ef4444;
+  --border: rgba(13, 24, 34, 0.08);
+  --input: rgba(13, 24, 34, 0.1);
+  --ring: rgba(23, 178, 106, 0.35);
+  --page-background:
+    radial-gradient(circle at top, rgba(23, 178, 106, 0.1), transparent 25%),
+    linear-gradient(180deg, #f5faf8 0%, #eff6f4 100%);
+}
+
+.dark {
+  --background: #08111f;
+  --foreground: #edf7f3;
+  --card: rgba(12, 22, 37, 0.82);
+  --card-foreground: #edf7f3;
+  --popover: #0b1524;
+  --popover-foreground: #edf7f3;
+  --primary: #2fd17e;
+  --primary-foreground: #04110b;
+  --secondary: #132538;
+  --secondary-foreground: #edf7f3;
+  --muted: #101f31;
+  --muted-foreground: #8fa5b8;
+  --accent: #16324b;
+  --accent-foreground: #edf7f3;
+  --destructive: #f87171;
+  --border: rgba(226, 237, 243, 0.1);
+  --input: rgba(226, 237, 243, 0.12);
+  --ring: rgba(47, 209, 126, 0.35);
+  --page-background:
+    radial-gradient(circle at top, rgba(70, 225, 144, 0.13), transparent 28%),
+    linear-gradient(180deg, #08111f 0%, #050a13 100%);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
+  min-height: 100vh;
+  background: var(--page-background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-dm-sans), sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+a,
+button {
+  transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+  transition-duration: 180ms;
+  transition-timing-function: ease;
+}
+
+::selection {
+  background: rgba(47, 209, 126, 0.25);
 }

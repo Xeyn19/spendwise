@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 420" fill="none">
+  <defs>
+    <linearGradient id="mark" x1="72" y1="320" x2="346" y2="74" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18c18d"/>
+      <stop offset="0.55" stop-color="#3fd37a"/>
+      <stop offset="1" stop-color="#b8ec61"/>
+    </linearGradient>
+  </defs>
+  <path d="M93 311C62 277 44 232 46 185C49 92 122 37 214 37C281 37 341 68 373 117" stroke="url(#mark)" stroke-width="24" stroke-linecap="round"/>
+  <path d="M336 304C304 349 252 376 193 376C156 376 121 366 91 348" stroke="url(#mark)" stroke-width="24" stroke-linecap="round"/>
+  <path d="M253 112H172C138 112 111 139 111 173C111 207 138 234 172 234H208C242 234 269 261 269 295C269 329 242 356 208 356H130" stroke="white" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M224 314L269 260L300 302L357 192" stroke="white" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M286 204H319V312L286 275V204Z" fill="url(#mark)"/>
+  <path d="M327 159H360V271L327 233V159Z" fill="url(#mark)"/>
+  <path d="M366 113H399V227L366 189V113Z" fill="url(#mark)"/>
+  <path d="M300 324L385 239L374 219L331 262L300 230V324Z" fill="url(#mark)"/>
+  <path d="M69 257H147" stroke="url(#mark)" stroke-width="14" stroke-linecap="round"/>
+  <path d="M78 290H133" stroke="url(#mark)" stroke-width="14" stroke-linecap="round"/>
+  <path d="M91 322H122" stroke="url(#mark)" stroke-width="14" stroke-linecap="round"/>
+  <path d="M105 352H117" stroke="url(#mark)" stroke-width="14" stroke-linecap="round"/>
+</svg>
