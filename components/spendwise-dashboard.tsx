@@ -40,13 +40,17 @@ import { toast } from "sonner";
 
 import {
   createBudgetAction,
+  createExpenseAction,
   createIncomeAction,
   deleteBudgetAction,
+  deleteExpenseAction,
   deleteIncomeAction,
   updateBudgetAction,
 } from "@/app/dashboard/actions";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { BudgetRecord } from "@/lib/budget-shared";
+import type { ExpenseRecord, ExpenseTransaction } from "@/lib/expense-shared";
+import { normalizeCategoryKey, toExpenseTransaction } from "@/lib/expense-shared";
 import type { IncomeRecord, IncomeTransaction } from "@/lib/income-shared";
 import { toIncomeTransaction } from "@/lib/income-shared";
 
@@ -70,12 +74,11 @@ type Budget = StoredBudget & {
   remaining: number;
 };
 
-type Expense = {
-  id: number;
-  category: string;
-  amount: number;
-  date: string;
-  note: string;
+type Expense = ExpenseRecord;
+
+type DerivedExpense = Expense & {
+  matchedBudgetId: string | null;
+  isBudgeted: boolean;
 };
 
 type SavingsGoal = {
@@ -86,7 +89,7 @@ type SavingsGoal = {
 };
 
 type Transaction = {
-  id: string | number;
+  id: string;
   date: string;
   type: "Income" | "Expense" | "Savings";
   category: string;
@@ -111,6 +114,7 @@ const navItems: Array<{ page: ActivePage; icon: React.ElementType }> = [
   { page: "Reports", icon: FileText },
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const initialBudgets: Array<{
   id: number;
   category: string;
@@ -122,14 +126,6 @@ const initialBudgets: Array<{
   { id: 2, category: "Transport", icon: "🚗", allocated: 3000, spent: 800 },
   { id: 3, category: "Shopping", icon: "🛍️", allocated: 4000, spent: 1500 },
   { id: 4, category: "Utilities", icon: "💡", allocated: 2500, spent: 1200 },
-];
-
-const initialExpenses: Expense[] = [
-  { id: 1, category: "Food", amount: 1200, date: "2026-05-02", note: "Groceries" },
-  { id: 2, category: "Food", amount: 800, date: "2026-05-08", note: "Restaurant" },
-  { id: 3, category: "Transport", amount: 800, date: "2026-05-05", note: "Gas" },
-  { id: 4, category: "Shopping", amount: 1500, date: "2026-05-11", note: "Clothes" },
-  { id: 5, category: "Utilities", amount: 1200, date: "2026-05-13", note: "Electric bill" },
 ];
 
 const initialSavingsGoals: SavingsGoal[] = [
@@ -164,15 +160,26 @@ function sortIncomes(rows: Income[]) {
   });
 }
 
-function incomeTransactions(rows: Income[]) {
-  return sortIncomes(rows).map(toIncomeTransaction);
-}
-
 function sortBudgetRecords(rows: StoredBudget[]) {
   return [...rows].sort((a, b) => {
     const dateOrder = b.periodStart.localeCompare(a.periodStart);
     return dateOrder !== 0 ? dateOrder : b.createdAt.localeCompare(a.createdAt);
   });
+}
+
+function sortExpenses(rows: Expense[]) {
+  return [...rows].sort((a, b) => {
+    const dateOrder = b.date.localeCompare(a.date);
+    return dateOrder !== 0 ? dateOrder : b.createdAt.localeCompare(a.createdAt);
+  });
+}
+
+function matchesBudget(expense: Expense, budget: StoredBudget) {
+  return (
+    normalizeCategoryKey(expense.category) === normalizeCategoryKey(budget.category) &&
+    expense.date >= budget.periodStart &&
+    expense.date <= budget.periodEnd
+  );
 }
 
 function formatBudgetDate(value: string) {
@@ -181,18 +188,6 @@ function formatBudgetDate(value: string) {
     day: "numeric",
     year: "numeric",
   });
-}
-
-function initialBudgetsFallback(): StoredBudget[] {
-  return initialBudgets.map((budget, index) => ({
-    id: `demo-budget-${index + 1}`,
-    category: budget.category,
-    icon: budget.icon,
-    allocatedAmount: budget.allocated,
-    periodStart: "2026-05-01",
-    periodEnd: "2026-05-31",
-    createdAt: `2026-05-0${index + 1}T00:00:00.000Z`,
-  }));
 }
 
 function pct(value: number, total: number) {
@@ -342,13 +337,15 @@ export function SpendWiseDashboard({
   user,
   initialIncomes,
   initialBudgets,
+  initialExpenses,
   initialTransactions,
   todayIso,
 }: {
   user: UserProfile;
   initialIncomes: Income[];
   initialBudgets: StoredBudget[];
-  initialTransactions: IncomeTransaction[];
+  initialExpenses: Expense[];
+  initialTransactions: Array<IncomeTransaction | ExpenseTransaction>;
   todayIso: string;
 }) {
   const initials = React.useMemo(
@@ -378,26 +375,13 @@ export function SpendWiseDashboard({
   const [notifications, setNotifications] = React.useState(true);
   const [isMutatingIncome, startIncomeMutation] = React.useTransition();
   const [isMutatingBudget, startBudgetMutation] = React.useTransition();
+  const [isMutatingExpense, startExpenseMutation] = React.useTransition();
 
   const [incomes, setIncomes] = React.useState<Income[]>(initialIncomes);
-  const [budgetRecords, setBudgetRecords] = React.useState<StoredBudget[]>(
-    initialBudgets.length > 0
-      ? initialBudgets
-      : initialBudgetsFallback().slice(0, 0)
-  );
-  const [expenses, setExpenses] = React.useState<Expense[]>(initialExpenses);
+  const [budgetRecords, setBudgetRecords] = React.useState<StoredBudget[]>(initialBudgets);
+  const [expenses, setExpenses] = React.useState<Expense[]>(sortExpenses(initialExpenses));
   const [savingsGoals, setSavingsGoals] = React.useState<SavingsGoal[]>(initialSavingsGoals);
-  const [transactions, setTransactions] = React.useState<Transaction[]>(() => [
-    ...initialTransactions,
-    ...initialExpenses.map((expense) => ({
-      id: expense.id + 100,
-      date: expense.date,
-      type: "Expense" as const,
-      category: expense.category,
-      amount: expense.amount,
-      note: expense.note,
-    })),
-  ]);
+  const [transactions, setTransactions] = React.useState<Transaction[]>(() => [...initialTransactions]);
 
   const [forms, setForms] = React.useState({
     source: "",
@@ -409,7 +393,7 @@ export function SpendWiseDashboard({
     budgetIcon: iconOptions[0],
     budgetStartDate: todayIso,
     budgetEndDate: todayIso,
-    expenseCategory: "Food",
+    expenseCategory: "",
     expenseAmount: "",
     expenseDate: todayIso,
     expenseNote: "",
@@ -446,40 +430,50 @@ export function SpendWiseDashboard({
     [todayIso]
   );
 
+  const derivedExpenses = React.useMemo<DerivedExpense[]>(
+    () =>
+      sortExpenses(expenses).map((expense) => {
+        const matchedBudget = budgetRecords.find((budget) => matchesBudget(expense, budget));
+
+        return {
+          ...expense,
+          matchedBudgetId: matchedBudget?.id ?? null,
+          isBudgeted: Boolean(matchedBudget),
+        };
+      }),
+    [budgetRecords, expenses]
+  );
+
   const budgets = React.useMemo<Budget[]>(
     () =>
       sortBudgetRecords(budgetRecords).map((budget) => {
-        const spent = expenses
-          .filter(
-            (expense) =>
-              expense.category === budget.category &&
-              expense.date >= budget.periodStart &&
-              expense.date <= budget.periodEnd
-          )
+        const spent = derivedExpenses
+          .filter((expense) => expense.matchedBudgetId === budget.id)
           .reduce((sum, expense) => sum + expense.amount, 0);
 
         return {
           ...budget,
           allocated: budget.allocatedAmount,
           spent,
-          remaining: Math.max(0, budget.allocatedAmount - spent),
+          remaining: budget.allocatedAmount - spent,
         };
       }),
-    [budgetRecords, expenses]
+    [budgetRecords, derivedExpenses]
   );
 
   const totals = React.useMemo(() => {
     const income = incomes.reduce((sum, item) => sum + item.amount, 0);
     const totalBudget = budgets.reduce((sum, item) => sum + item.allocated, 0);
-    const totalExpenses = expenses.reduce((sum, item) => sum + item.amount, 0);
+    const totalExpenses = derivedExpenses.reduce((sum, item) => sum + item.amount, 0);
+    const budgetedExpenses = budgets.reduce((sum, item) => sum + item.spent, 0);
     const totalSavings = savingsGoals.reduce((sum, item) => sum + item.saved, 0);
     const remainingBalance = income - totalExpenses - totalSavings;
-    const budgetRemaining = totalBudget - totalExpenses;
+    const budgetRemaining = totalBudget - budgetedExpenses;
     return { income, totalBudget, totalExpenses, totalSavings, remainingBalance, budgetRemaining };
-  }, [budgets, expenses, incomes, savingsGoals]);
+  }, [budgets, derivedExpenses, incomes, savingsGoals]);
 
   const expenseByCategory = React.useMemo(() => {
-    const grouped = expenses.reduce<Record<string, number>>((acc, expense) => {
+    const grouped = derivedExpenses.reduce<Record<string, number>>((acc, expense) => {
       acc[expense.category] = (acc[expense.category] ?? 0) + expense.amount;
       return acc;
     }, {});
@@ -488,7 +482,7 @@ export function SpendWiseDashboard({
       value,
       color: pieColors[index % pieColors.length],
     }));
-  }, [expenses]);
+  }, [derivedExpenses]);
 
   const monthlyChartData = React.useMemo(
     () => {
@@ -502,7 +496,7 @@ export function SpendWiseDashboard({
         return acc;
       }, {});
 
-      const expenseByMonth = expenses.reduce<Record<string, number>>((acc, expense) => {
+      const expenseByMonth = derivedExpenses.reduce<Record<string, number>>((acc, expense) => {
         const monthKey = new Date(`${expense.date}T00:00:00`).toLocaleDateString("en-US", {
           month: "short",
           timeZone: "UTC",
@@ -518,7 +512,7 @@ export function SpendWiseDashboard({
         expenses: expenseByMonth[item.month] ?? 0,
       }));
     },
-    [expenses, incomes]
+    [derivedExpenses, incomes]
   );
 
   const recentTransactions = React.useMemo(
@@ -527,13 +521,13 @@ export function SpendWiseDashboard({
   );
 
   const categories = React.useMemo(
-    () => Array.from(new Set([...budgets.map((budget) => budget.category), "Other"])),
-    [budgets]
+    () => Array.from(new Set([...budgetRecords.map((budget) => budget.category), ...derivedExpenses.map((expense) => expense.category)])).sort(),
+    [budgetRecords, derivedExpenses]
   );
 
   const filteredExpenses = React.useMemo(
-    () => (expenseFilter === "All" ? expenses : expenses.filter((expense) => expense.category === expenseFilter)),
-    [expenseFilter, expenses]
+    () => (expenseFilter === "All" ? derivedExpenses : derivedExpenses.filter((expense) => expense.category === expenseFilter)),
+    [derivedExpenses, expenseFilter]
   );
 
   const topCategory = React.useMemo(() => {
@@ -585,7 +579,7 @@ export function SpendWiseDashboard({
 
   const addTransaction = React.useCallback((transaction: Omit<Transaction, "id">) => {
     setTransactions((current) => [
-      { ...transaction, id: Date.now() + Math.floor(Math.random() * 1000) },
+      { ...transaction, id: `${transaction.type.toLowerCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}` },
       ...current,
     ]);
   }, []);
@@ -716,7 +710,7 @@ export function SpendWiseDashboard({
   const saveExpense = React.useCallback(() => {
     const nextErrors: Record<string, string> = {};
     const amount = Number(forms.expenseAmount);
-    if (!forms.expenseCategory) nextErrors.expenseCategory = "Category is required.";
+    if (!forms.expenseCategory.trim()) nextErrors.expenseCategory = "Category is required.";
     if (!forms.expenseDate) nextErrors.expenseDate = "Date is required.";
     if (!amount || amount <= 0) nextErrors.expenseAmount = "Amount must be greater than 0.";
     if (Object.keys(nextErrors).length) {
@@ -724,24 +718,36 @@ export function SpendWiseDashboard({
       return;
     }
 
-    const expense = {
-      id: Date.now(),
-      category: forms.expenseCategory,
-      amount,
-      date: forms.expenseDate,
-      note: forms.expenseNote.trim(),
-    };
-    setExpenses((current) => [expense, ...current]);
-    addTransaction({
-      date: expense.date,
-      type: "Expense",
-      category: expense.category,
-      amount: expense.amount,
-      note: expense.note,
+    const formData = new FormData();
+    formData.set("category", forms.expenseCategory.trim());
+    formData.set("amount", String(amount));
+    formData.set("spentOn", forms.expenseDate);
+    formData.set("note", forms.expenseNote.trim());
+
+    startExpenseMutation(async () => {
+      const result = await createExpenseAction(formData);
+
+      if (!result.success || !result.expense) {
+        toast.error(result.message ?? "Could not save expense.");
+        return;
+      }
+
+      const expense = result.expense;
+
+      setExpenses((current) => sortExpenses([expense, ...current]));
+      setTransactions((current) => [toExpenseTransaction(expense), ...current]);
+      setForms((current) => ({ ...current, expenseCategory: "", expenseAmount: "", expenseNote: "" }));
+      resetModal();
+      toast.success("Expense saved.");
     });
-    setForms((current) => ({ ...current, expenseAmount: "", expenseNote: "" }));
-    resetModal();
-  }, [addTransaction, forms.expenseAmount, forms.expenseCategory, forms.expenseDate, forms.expenseNote, resetModal]);
+  }, [
+    forms.expenseAmount,
+    forms.expenseCategory,
+    forms.expenseDate,
+    forms.expenseNote,
+    resetModal,
+    startExpenseMutation,
+  ]);
 
   const saveSavingsGoal = React.useCallback(() => {
     const nextErrors: Record<string, string> = {};
@@ -809,15 +815,20 @@ export function SpendWiseDashboard({
   }, [startIncomeMutation]);
 
   const deleteExpense = React.useCallback((expense: Expense) => {
-    setExpenses((current) => current.filter((item) => item.id !== expense.id));
-    setTransactions((current) =>
-      current.filter(
-        (transaction) =>
-          !(transaction.type === "Expense" && transaction.category === expense.category && transaction.amount === expense.amount)
-      )
-    );
-    setDeleteTarget(null);
-  }, []);
+    startExpenseMutation(async () => {
+      const result = await deleteExpenseAction(expense.id);
+
+      if (!result.success) {
+        toast.error(result.message ?? "Could not delete expense.");
+        return;
+      }
+
+      setExpenses((current) => current.filter((item) => item.id !== expense.id));
+      setTransactions((current) => current.filter((transaction) => transaction.id !== `expense-${expense.id}`));
+      setDeleteTarget(null);
+      toast.success("Expense deleted.");
+    });
+  }, [startExpenseMutation]);
 
   const deleteBudget = React.useCallback((budget: Budget) => {
     startBudgetMutation(async () => {
@@ -835,11 +846,10 @@ export function SpendWiseDashboard({
   }, []);
 
   const clearAllData = React.useCallback(() => {
-    setExpenses([]);
     setSavingsGoals([]);
-    setTransactions(incomeTransactions(incomes));
+    setTransactions((current) => current.filter((transaction) => transaction.type !== "Savings"));
     setDeleteTarget(null);
-  }, [incomes]);
+  }, []);
 
   const renderDeleteConfirm = React.useCallback(
     (target: string, onYes: () => void) =>
@@ -847,7 +857,7 @@ export function SpendWiseDashboard({
         <div className="flex items-center gap-2 text-xs font-semibold">
           <span className="text-slate-500">Are you sure?</span>
           <button className="text-emerald-700 hover:underline" onClick={onYes}>
-            {isMutatingIncome || isMutatingBudget ? "..." : "Yes"}
+            {isMutatingIncome || isMutatingBudget || isMutatingExpense ? "..." : "Yes"}
           </button>
           <button className="text-slate-500 hover:underline" onClick={() => setDeleteTarget(null)}>
             No
@@ -862,7 +872,7 @@ export function SpendWiseDashboard({
           <Trash2 className="size-4" />
         </button>
       ),
-    [deleteTarget, isMutatingBudget, isMutatingIncome]
+    [deleteTarget, isMutatingBudget, isMutatingExpense, isMutatingIncome]
   );
 
   const sidebar = (
@@ -1152,7 +1162,9 @@ export function SpendWiseDashboard({
                 <ProgressBar value={pct(budget.spent, budget.allocated)} tone={barTone(pct(budget.spent, budget.allocated))} />
                 <div className="mt-2 flex justify-between text-sm font-semibold">
                   <span>{pct(budget.spent, budget.allocated)}%</span>
-                  <span className="text-slate-500">{peso(budget.remaining)} left</span>
+                  <span className={cx(budget.remaining >= 0 ? "text-slate-500" : "text-red-600")}>
+                    {budget.remaining >= 0 ? `${peso(budget.remaining)} left` : `${peso(Math.abs(budget.remaining))} over`}
+                  </span>
                 </div>
               </div>
             </Panel>
@@ -1172,9 +1184,17 @@ export function SpendWiseDashboard({
             <p className="mt-2 text-4xl font-bold text-red-600">{peso(totals.totalExpenses)}</p>
           </Panel>
           <Panel>
-            <p className="text-sm font-semibold text-slate-500">Top category</p>
-            <p className="mt-2 text-4xl font-bold text-slate-950">{topCategory.name}</p>
-            <p className="mt-1 text-sm text-slate-500">{peso(topCategory.value)}</p>
+            <p className="text-sm font-semibold text-slate-500">Unbudgeted expenses</p>
+            <p className="mt-2 text-4xl font-bold text-slate-950">
+              {derivedExpenses.filter((expense) => !expense.isBudgeted).length}
+            </p>
+            <p className="mt-1 text-sm text-slate-500">
+              {peso(
+                derivedExpenses
+                  .filter((expense) => !expense.isBudgeted)
+                  .reduce((sum, expense) => sum + expense.amount, 0)
+              )}
+            </p>
           </Panel>
         </section>
         <Panel>
@@ -1200,6 +1220,7 @@ export function SpendWiseDashboard({
                 <th className="py-3 pr-4">Date</th>
                 <th className="py-3 pr-4">Category</th>
                 <th className="py-3 pr-4">Amount</th>
+                <th className="py-3 pr-4">Budget</th>
                 <th className="py-3 pr-4">Note</th>
                 <th className="py-3 text-right">Action</th>
               </tr>
@@ -1210,6 +1231,11 @@ export function SpendWiseDashboard({
                   <td className="py-4 pr-4 text-slate-500">{expense.date}</td>
                   <td className="py-4 pr-4 font-semibold text-slate-900">{expense.category}</td>
                   <td className="py-4 pr-4 font-bold text-red-600">{peso(expense.amount)}</td>
+                  <td className="py-4 pr-4">
+                    <Badge tone={expense.isBudgeted ? "green" : "amber"}>
+                      {expense.isBudgeted ? "Budgeted" : "Unbudgeted"}
+                    </Badge>
+                  </td>
                   <td className="py-4 pr-4 text-slate-500">{expense.note || "—"}</td>
                   <td className="py-4 text-right">{renderDeleteConfirm(`expense-${expense.id}`, () => deleteExpense(expense))}</td>
                 </tr>
@@ -1385,11 +1411,11 @@ export function SpendWiseDashboard({
           </div>
         </Panel>
         <Panel className="border-red-200">
-          <SectionTitle title="Danger Zone" subtitle="Remove local demo expenses and savings" />
+          <SectionTitle title="Danger Zone" subtitle="Remove local demo savings only" />
           <div className="mt-5">
             {deleteTarget === "clear-all" ? (
               <div className="flex flex-wrap items-center gap-3">
-                <span className="font-semibold text-red-700">Clear local expenses and savings?</span>
+                <span className="font-semibold text-red-700">Clear local savings data?</span>
                 <AppButton variant="danger" onClick={clearAllData}>
                   Yes, clear data
                 </AppButton>
@@ -1491,13 +1517,20 @@ export function SpendWiseDashboard({
             {modal === "expense" ? (
               <>
                 <Field label="Category" error={errors.expenseCategory}>
-                  <SelectInput value={forms.expenseCategory} invalid={!!errors.expenseCategory} onChange={(e) => updateForm("expenseCategory", e.target.value)}>
-                    {categories.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </SelectInput>
+                  <>
+                    <TextInput
+                      value={forms.expenseCategory}
+                      invalid={!!errors.expenseCategory}
+                      onChange={(e) => updateForm("expenseCategory", e.target.value)}
+                      placeholder="Food"
+                      list="expense-category-options"
+                    />
+                    <datalist id="expense-category-options">
+                      {categories.map((category) => (
+                        <option key={category} value={category} />
+                      ))}
+                    </datalist>
+                  </>
                 </Field>
                 <Field label="Amount" error={errors.expenseAmount}>
                   <TextInput type="number" value={forms.expenseAmount} invalid={!!errors.expenseAmount} onChange={(e) => updateForm("expenseAmount", e.target.value)} placeholder="₱0" />
@@ -1564,7 +1597,11 @@ export function SpendWiseDashboard({
                 Cancel
               </AppButton>
               <AppButton
-                disabled={(modal === "income" && isMutatingIncome) || (modal === "budget" && isMutatingBudget)}
+                disabled={
+                  (modal === "income" && isMutatingIncome) ||
+                  (modal === "budget" && isMutatingBudget) ||
+                  (modal === "expense" && isMutatingExpense)
+                }
                 onClick={
                   modal === "income"
                     ? saveIncome
@@ -1581,6 +1618,8 @@ export function SpendWiseDashboard({
                   ? "Saving..."
                   : modal === "budget" && isMutatingBudget
                     ? "Saving..."
+                    : modal === "expense" && isMutatingExpense
+                      ? "Saving..."
                     : "Save"}
               </AppButton>
             </div>
@@ -1761,7 +1800,8 @@ function BudgetProgress({ budget }: { budget: Budget }) {
           <div>
             <h3 className="font-bold text-foreground dark:text-white">{budget.category} Budget</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Allocated {peso(budget.allocated)} | Spent {peso(budget.spent)} | Remaining {peso(budget.remaining)}
+              Allocated {peso(budget.allocated)} | Spent {peso(budget.spent)} | Remaining{" "}
+              {budget.remaining >= 0 ? peso(budget.remaining) : `-${peso(Math.abs(budget.remaining))}`}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {formatBudgetDate(budget.periodStart)} - {formatBudgetDate(budget.periodEnd)}

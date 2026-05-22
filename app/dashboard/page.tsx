@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 
 import { SpendWiseDashboard } from "@/components/spendwise-dashboard";
 import { listUserBudgets } from "@/lib/budgets";
+import { listUserExpenses } from "@/lib/expenses";
+import { toExpenseTransaction } from "@/lib/expense-shared";
 import { toIncomeTransaction } from "@/lib/income-shared";
 import { listUserIncomes } from "@/lib/incomes";
 import { createClient } from "@/lib/supabase/server";
@@ -29,6 +31,7 @@ export default async function DashboardPage() {
     (typeof claims.email === "string" ? claims.email : "No email available");
   let incomes: Awaited<ReturnType<typeof listUserIncomes>> = [];
   let budgets: Awaited<ReturnType<typeof listUserBudgets>> = [];
+  let expenses: Awaited<ReturnType<typeof listUserExpenses>> = [];
 
   try {
     incomes = await listUserIncomes();
@@ -42,8 +45,13 @@ export default async function DashboardPage() {
     console.error("Could not load budgets for dashboard.", error);
   }
 
-  const recentTransactions = incomes
-    .map(toIncomeTransaction)
+  try {
+    expenses = await listUserExpenses();
+  } catch (error) {
+    console.error("Could not load expenses for dashboard.", error);
+  }
+
+  const recentTransactions = [...incomes.map(toIncomeTransaction), ...expenses.map(toExpenseTransaction)]
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 10);
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -53,6 +61,7 @@ export default async function DashboardPage() {
       user={{ name: fullName, email }}
       initialIncomes={incomes}
       initialBudgets={budgets}
+      initialExpenses={expenses}
       initialTransactions={recentTransactions}
       todayIso={todayIso}
     />

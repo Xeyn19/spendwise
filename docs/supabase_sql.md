@@ -549,3 +549,175 @@ for delete
 to authenticated
 using ((select auth.uid()) = user_id);
 ```
+
+## 17. Create the `expenses` Table
+
+```sql
+create extension if not exists pgcrypto;
+
+create table if not exists public.expenses (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  category text not null,
+  category_key text generated always as (lower(btrim(category))) stored,
+  amount numeric(12, 2) not null,
+  spent_on date not null,
+  note text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint expenses_category_not_blank check (btrim(category) <> ''),
+  constraint expenses_amount_positive check (amount > 0)
+);
+
+create index if not exists idx_expenses_user_spent_on_desc
+  on public.expenses (user_id, spent_on desc, created_at desc);
+
+create index if not exists idx_expenses_user_category_key_spent_on
+  on public.expenses (user_id, category_key, spent_on desc);
+```
+
+## 18. Attach the `updated_at` Trigger to `expenses`
+
+This reuses the existing `public.set_updated_at()` function from section 2.
+
+```sql
+drop trigger if exists set_expenses_updated_at on public.expenses;
+
+create trigger set_expenses_updated_at
+before update on public.expenses
+for each row
+execute function public.set_updated_at();
+```
+
+## 19. Enable Row Level Security for `expenses`
+
+```sql
+alter table public.expenses enable row level security;
+```
+
+## 20. Create RLS Policies for `expenses`
+
+### 20.1 Allow users to view only their own expense rows
+
+```sql
+drop policy if exists "Users can view own expenses" on public.expenses;
+
+create policy "Users can view own expenses"
+on public.expenses
+for select
+to authenticated
+using ((select auth.uid()) = user_id);
+```
+
+### 20.2 Allow users to insert only their own expense rows
+
+```sql
+drop policy if exists "Users can insert own expenses" on public.expenses;
+
+create policy "Users can insert own expenses"
+on public.expenses
+for insert
+to authenticated
+with check ((select auth.uid()) = user_id);
+```
+
+### 20.3 Allow users to update only their own expense rows
+
+```sql
+drop policy if exists "Users can update own expenses" on public.expenses;
+
+create policy "Users can update own expenses"
+on public.expenses
+for update
+to authenticated
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);
+```
+
+### 20.4 Allow users to delete only their own expense rows
+
+```sql
+drop policy if exists "Users can delete own expenses" on public.expenses;
+
+create policy "Users can delete own expenses"
+on public.expenses
+for delete
+to authenticated
+using ((select auth.uid()) = user_id);
+```
+
+## 21. Expense-Only SQL Block
+
+Run this after the existing profile, income, and budget setup if you want only the expense schema:
+
+```sql
+create extension if not exists pgcrypto;
+
+create table if not exists public.expenses (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  category text not null,
+  category_key text generated always as (lower(btrim(category))) stored,
+  amount numeric(12, 2) not null,
+  spent_on date not null,
+  note text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint expenses_category_not_blank check (btrim(category) <> ''),
+  constraint expenses_amount_positive check (amount > 0)
+);
+
+create index if not exists idx_expenses_user_spent_on_desc
+  on public.expenses (user_id, spent_on desc, created_at desc);
+
+create index if not exists idx_expenses_user_category_key_spent_on
+  on public.expenses (user_id, category_key, spent_on desc);
+
+alter table public.expenses enable row level security;
+
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists set_expenses_updated_at on public.expenses;
+
+create trigger set_expenses_updated_at
+before update on public.expenses
+for each row
+execute function public.set_updated_at();
+
+drop policy if exists "Users can view own expenses" on public.expenses;
+create policy "Users can view own expenses"
+on public.expenses
+for select
+to authenticated
+using ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can insert own expenses" on public.expenses;
+create policy "Users can insert own expenses"
+on public.expenses
+for insert
+to authenticated
+with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can update own expenses" on public.expenses;
+create policy "Users can update own expenses"
+on public.expenses
+for update
+to authenticated
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can delete own expenses" on public.expenses;
+create policy "Users can delete own expenses"
+on public.expenses
+for delete
+to authenticated
+using ((select auth.uid()) = user_id);
+```

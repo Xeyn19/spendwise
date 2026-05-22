@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 
 import type { BudgetRecord } from "@/lib/budget-shared";
 import { sanitizeErrorMessage } from "@/lib/error-message";
+import type { ExpenseRecord } from "@/lib/expense-shared";
+import { normalizeCategoryKey } from "@/lib/expense-shared";
 import type { IncomeRecord } from "@/lib/income-shared";
 import { createClient } from "@/lib/supabase/server";
 
@@ -22,6 +24,13 @@ type BudgetActionResult = {
   deletedId?: string;
 };
 
+type ExpenseActionResult = {
+  success: boolean;
+  message?: string;
+  expense?: ExpenseRecord;
+  deletedId?: string;
+};
+
 function parseAmount(value: string) {
   const amount = Number(value);
 
@@ -30,10 +39,6 @@ function parseAmount(value: string) {
   }
 
   return amount;
-}
-
-function normalizeCategoryKey(value: string) {
-  return value.trim().toLowerCase();
 }
 
 function isValidDateString(value: string) {
@@ -146,6 +151,76 @@ async function validateBudgetInput({
   return null;
 }
 
+async function validateIncomeDeletion({
+  userId,
+  incomeId,
+  receivedOn,
+}: {
+  userId: string;
+  incomeId: string;
+  receivedOn: string;
+}): Promise<string | null> {
+  const supabase = await createClient();
+  const { data: affectedBudgets, error: affectedBudgetsError } = await supabase
+    .from("budgets")
+    .select("id, period_start, period_end")
+    .eq("user_id", userId)
+    .lte("period_start", receivedOn)
+    .gte("period_end", receivedOn);
+
+  if (affectedBudgetsError) {
+    return sanitizeErrorMessage(
+      affectedBudgetsError.message,
+      "Could not validate income deletion."
+    );
+  }
+
+  for (const budget of affectedBudgets ?? []) {
+    const { data: overlappingBudgets, error: budgetError } = await supabase
+      .from("budgets")
+      .select("allocated_amount")
+      .eq("user_id", userId)
+      .lte("period_start", budget.period_end)
+      .gte("period_end", budget.period_start);
+
+    if (budgetError) {
+      return sanitizeErrorMessage(
+        budgetError.message,
+        "Could not validate income deletion."
+      );
+    }
+
+    const { data: incomes, error: incomeError } = await supabase
+      .from("incomes")
+      .select("id, amount")
+      .eq("user_id", userId)
+      .gte("received_on", budget.period_start)
+      .lte("received_on", budget.period_end);
+
+    if (incomeError) {
+      return sanitizeErrorMessage(
+        incomeError.message,
+        "Could not validate income deletion."
+      );
+    }
+
+    const budgetTotal = (overlappingBudgets ?? []).reduce(
+      (sum, item) => sum + Number(item.allocated_amount),
+      0
+    );
+    const remainingIncome = (incomes ?? []).reduce(
+      (sum, item) => sum + (item.id === incomeId ? 0 : Number(item.amount)),
+      0
+    );
+
+    if (budgetTotal > remainingIncome) {
+      return "Deleting this income would make existing budgets exceed recorded income for the affected period.";
+    }
+  }
+
+  return null;
+}
+
 export async function createIncomeAction(formData: FormData): Promise<IncomeActionResult> {
   const supabase = await createClient();
   const { data: claimsData } = await supabase.auth.getClaims();
@@ -216,6 +291,37 @@ export async function deleteIncomeAction(incomeId: string): Promise<IncomeAction
     redirect("/login");
   }
 
+  const { data: income, error: incomeLookupError } = await supabase
+    .from("incomes")
+    .select("id, received_on")
+    .eq("id", incomeId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (incomeLookupError) {
+    return {
+      success: false,
+      message: sanitizeErrorMessage(
+        incomeLookupError.message,
+        "Could not load income."
+      ),
+    };
+  }
+
+  if (!income) {
+    return { success: false, message: "Income record not found." };
+  }
+
+  const validationMessage = await validateIncomeDeletion({
+    userId,
+    incomeId,
+    receivedOn: income.received_on,
+  });
+
+  if (validationMessage) {
+    return { success: false, message: validationMessage };
+  }
+
   const { error } = await supabase
     .from("incomes")
     .delete()
@@ -232,6 +338,94 @@ export async function deleteIncomeAction(incomeId: string): Promise<IncomeAction
   revalidatePath("/dashboard");
 
   return { success: true, deletedId: incomeId };
+}
+
+export async function createExpenseAction(formData: FormData): Promise<ExpenseActionResult> {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims?.sub;
+
+  if (!userId) {
+    redirect("/login");
+  }
+
+  const category = String(formData.get("category") ?? "").trim();
+  const amountValue = String(formData.get("amount") ?? "").trim();
+  const spentOn = String(formData.get("spentOn") ?? "").trim();
+  const note = String(formData.get("note") ?? "").trim();
+  const amount = parseAmount(amountValue);
+
+  if (!category) {
+    return { success: false, message: "Category is required." };
+  }
+
+  if (!isValidDateString(spentOn)) {
+    return { success: false, message: "Date is required." };
+  }
+
+  if (!amount || amount <= 0) {
+    return { success: false, message: "Amount must be greater than 0." };
+  }
+
+  const { data, error } = await supabase
+    .from("expenses")
+    .insert({
+      user_id: userId,
+      category,
+      amount,
+      spent_on: spentOn,
+      note,
+    })
+    .select("id, category, amount, spent_on, note, created_at")
+    .single();
+
+  if (error) {
+    return {
+      success: false,
+      message: sanitizeErrorMessage(error.message, "Could not save expense."),
+    };
+  }
+
+  revalidatePath("/dashboard");
+
+  return {
+    success: true,
+    expense: {
+      id: data.id,
+      category: data.category,
+      amount: Number(data.amount),
+      date: data.spent_on,
+      note: data.note ?? "",
+      createdAt: data.created_at,
+    },
+  };
+}
+
+export async function deleteExpenseAction(expenseId: string): Promise<ExpenseActionResult> {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims?.sub;
+
+  if (!userId) {
+    redirect("/login");
+  }
+
+  const { error } = await supabase
+    .from("expenses")
+    .delete()
+    .eq("id", expenseId)
+    .eq("user_id", userId);
+
+  if (error) {
+    return {
+      success: false,
+      message: sanitizeErrorMessage(error.message, "Could not delete expense."),
+    };
+  }
+
+  revalidatePath("/dashboard");
+
+  return { success: true, deletedId: expenseId };
 }
 
 export async function createBudgetAction(formData: FormData): Promise<BudgetActionResult> {
