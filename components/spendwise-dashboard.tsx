@@ -38,7 +38,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { createIncomeAction, deleteIncomeAction } from "@/app/dashboard/actions";
 import { ThemeToggle } from "@/components/theme-toggle";
+import type { IncomeRecord, IncomeTransaction } from "@/lib/income-shared";
+import { toIncomeTransaction } from "@/lib/income-shared";
 
 type ActivePage =
   | "Dashboard"
@@ -50,13 +53,7 @@ type ActivePage =
   | "Reports"
   | "Settings";
 
-type Income = {
-  id: number;
-  source: string;
-  amount: number;
-  date: string;
-  note: string;
-};
+type Income = IncomeRecord;
 
 type Budget = {
   id: number;
@@ -82,7 +79,7 @@ type SavingsGoal = {
 };
 
 type Transaction = {
-  id: number;
+  id: string | number;
   date: string;
   type: "Income" | "Expense" | "Savings";
   category: string;
@@ -105,11 +102,6 @@ const navItems: Array<{ page: ActivePage; icon: React.ElementType }> = [
   { page: "Savings", icon: PiggyBank },
   { page: "Analytics", icon: BarChart2 },
   { page: "Reports", icon: FileText },
-];
-
-const initialIncomes: Income[] = [
-  { id: 1, source: "Monthly Salary", amount: 45000, date: "2026-05-01", note: "May salary" },
-  { id: 2, source: "Freelance", amount: 8000, date: "2026-05-10", note: "Web project" },
 ];
 
 const initialBudgets: Budget[] = [
@@ -152,8 +144,15 @@ function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function todayInput() {
-  return "2026-05-14";
+function sortIncomes(rows: Income[]) {
+  return [...rows].sort((a, b) => {
+    const dateOrder = b.date.localeCompare(a.date);
+    return dateOrder !== 0 ? dateOrder : b.createdAt.localeCompare(a.createdAt);
+  });
+}
+
+function incomeTransactions(rows: Income[]) {
+  return sortIncomes(rows).map(toIncomeTransaction);
 }
 
 function pct(value: number, total: number) {
@@ -299,7 +298,17 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
-export function SpendWiseDashboard({ user }: { user: UserProfile }) {
+export function SpendWiseDashboard({
+  user,
+  initialIncomes,
+  initialTransactions,
+  todayIso,
+}: {
+  user: UserProfile;
+  initialIncomes: Income[];
+  initialTransactions: IncomeTransaction[];
+  todayIso: string;
+}) {
   const initials = React.useMemo(
     () =>
       user.name
@@ -325,20 +334,14 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
   const [profileEmail, setProfileEmail] = React.useState(user.email);
   const [compactCurrency, setCompactCurrency] = React.useState(false);
   const [notifications, setNotifications] = React.useState(true);
+  const [isMutatingIncome, startIncomeMutation] = React.useTransition();
 
   const [incomes, setIncomes] = React.useState<Income[]>(initialIncomes);
   const [budgets, setBudgets] = React.useState<Budget[]>(initialBudgets);
   const [expenses, setExpenses] = React.useState<Expense[]>(initialExpenses);
   const [savingsGoals, setSavingsGoals] = React.useState<SavingsGoal[]>(initialSavingsGoals);
   const [transactions, setTransactions] = React.useState<Transaction[]>(() => [
-    ...initialIncomes.map((income) => ({
-      id: income.id,
-      date: income.date,
-      type: "Income" as const,
-      category: income.source,
-      amount: income.amount,
-      note: income.note,
-    })),
+    ...initialTransactions,
     ...initialExpenses.map((expense) => ({
       id: expense.id + 100,
       date: expense.date,
@@ -352,14 +355,14 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
   const [forms, setForms] = React.useState({
     source: "",
     incomeAmount: "",
-    incomeDate: todayInput(),
+    incomeDate: todayIso,
     incomeNote: "",
     budgetCategory: "",
     budgetAmount: "",
     budgetIcon: iconOptions[0],
     expenseCategory: "Food",
     expenseAmount: "",
-    expenseDate: todayInput(),
+    expenseDate: todayIso,
     expenseNote: "",
     goalName: "",
     targetAmount: "",
@@ -385,13 +388,13 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
 
   const currentDate = React.useMemo(
     () =>
-      new Date("2026-05-14").toLocaleDateString("en-PH", {
+      new Date(`${todayIso}T00:00:00`).toLocaleDateString("en-PH", {
         weekday: "short",
         month: "long",
         day: "numeric",
         year: "numeric",
       }),
-    []
+    [todayIso]
   );
 
   const totals = React.useMemo(() => {
@@ -417,13 +420,34 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
   }, [expenses]);
 
   const monthlyChartData = React.useMemo(
-    () =>
-      baseMonthlyChartData.map((item) =>
-        item.month === "May"
-          ? { ...item, income: totals.income, expenses: totals.totalExpenses }
-          : item
-      ),
-    [totals.income, totals.totalExpenses]
+    () => {
+      const incomeByMonth = incomes.reduce<Record<string, number>>((acc, income) => {
+        const monthKey = new Date(`${income.date}T00:00:00`).toLocaleDateString("en-US", {
+          month: "short",
+          timeZone: "UTC",
+        });
+
+        acc[monthKey] = (acc[monthKey] ?? 0) + income.amount;
+        return acc;
+      }, {});
+
+      const expenseByMonth = expenses.reduce<Record<string, number>>((acc, expense) => {
+        const monthKey = new Date(`${expense.date}T00:00:00`).toLocaleDateString("en-US", {
+          month: "short",
+          timeZone: "UTC",
+        });
+
+        acc[monthKey] = (acc[monthKey] ?? 0) + expense.amount;
+        return acc;
+      }, {});
+
+      return baseMonthlyChartData.map((item) => ({
+        ...item,
+        income: incomeByMonth[item.month] ?? 0,
+        expenses: expenseByMonth[item.month] ?? 0,
+      }));
+    },
+    [expenses, incomes]
   );
 
   const recentTransactions = React.useMemo(
@@ -535,24 +559,29 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
       return;
     }
 
-    const income = {
-      id: Date.now(),
-      source: forms.source.trim(),
-      amount,
-      date: forms.incomeDate,
-      note: forms.incomeNote.trim(),
-    };
-    setIncomes((current) => [income, ...current]);
-    addTransaction({
-      date: income.date,
-      type: "Income",
-      category: income.source,
-      amount: income.amount,
-      note: income.note,
+    const formData = new FormData();
+    formData.set("source", forms.source.trim());
+    formData.set("amount", String(amount));
+    formData.set("receivedOn", forms.incomeDate);
+    formData.set("note", forms.incomeNote.trim());
+
+    startIncomeMutation(async () => {
+      const result = await createIncomeAction(formData);
+
+      if (!result.success || !result.income) {
+        toast.error(result.message ?? "Could not save income.");
+        return;
+      }
+
+      const income = result.income;
+
+      setIncomes((current) => sortIncomes([income, ...current]));
+      setTransactions((current) => [toIncomeTransaction(income), ...current]);
+      setForms((current) => ({ ...current, source: "", incomeAmount: "", incomeNote: "" }));
+      resetModal();
+      toast.success("Income saved.");
     });
-    setForms((current) => ({ ...current, source: "", incomeAmount: "", incomeNote: "" }));
-    resetModal();
-  }, [addTransaction, forms.incomeAmount, forms.incomeDate, forms.incomeNote, forms.source, resetModal]);
+  }, [forms.incomeAmount, forms.incomeDate, forms.incomeNote, forms.source, resetModal]);
 
   const saveBudget = React.useCallback(() => {
     const nextErrors: Record<string, string> = {};
@@ -638,7 +667,7 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
     setSavingsGoals((current) => [goal, ...current]);
     if (saved > 0) {
       addTransaction({
-        date: todayInput(),
+        date: todayIso,
         type: "Savings",
         category: goal.name,
         amount: saved,
@@ -647,7 +676,7 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
     }
     setForms((current) => ({ ...current, goalName: "", targetAmount: "", initialSaved: "" }));
     resetModal();
-  }, [addTransaction, forms.goalName, forms.initialSaved, forms.targetAmount, resetModal]);
+  }, [addTransaction, forms.goalName, forms.initialSaved, forms.targetAmount, resetModal, todayIso]);
 
   const saveContribution = React.useCallback(() => {
     if (!contributionGoal) return;
@@ -662,25 +691,30 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
       )
     );
     addTransaction({
-      date: todayInput(),
+      date: todayIso,
       type: "Savings",
       category: contributionGoal.name,
       amount,
       note: "Goal contribution",
     });
     resetModal();
-  }, [addTransaction, contributionGoal, forms.contributionAmount, resetModal]);
+  }, [addTransaction, contributionGoal, forms.contributionAmount, resetModal, todayIso]);
 
   const deleteIncome = React.useCallback((income: Income) => {
-    setIncomes((current) => current.filter((item) => item.id !== income.id));
-    setTransactions((current) =>
-      current.filter(
-        (transaction) =>
-          !(transaction.type === "Income" && transaction.category === income.source && transaction.amount === income.amount)
-      )
-    );
-    setDeleteTarget(null);
-  }, []);
+    startIncomeMutation(async () => {
+      const result = await deleteIncomeAction(income.id);
+
+      if (!result.success) {
+        toast.error(result.message ?? "Could not delete income.");
+        return;
+      }
+
+      setIncomes((current) => current.filter((item) => item.id !== income.id));
+      setTransactions((current) => current.filter((transaction) => transaction.id !== `income-${income.id}`));
+      setDeleteTarget(null);
+      toast.success("Income deleted.");
+    });
+  }, [startIncomeMutation]);
 
   const deleteExpense = React.useCallback((expense: Expense) => {
     setExpenses((current) => current.filter((item) => item.id !== expense.id));
@@ -701,13 +735,12 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
   }, []);
 
   const clearAllData = React.useCallback(() => {
-    setIncomes([]);
     setBudgets([]);
     setExpenses([]);
     setSavingsGoals([]);
-    setTransactions([]);
+    setTransactions(incomeTransactions(incomes));
     setDeleteTarget(null);
-  }, []);
+  }, [incomes]);
 
   const renderDeleteConfirm = React.useCallback(
     (target: string, onYes: () => void) =>
@@ -715,7 +748,7 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
         <div className="flex items-center gap-2 text-xs font-semibold">
           <span className="text-slate-500">Are you sure?</span>
           <button className="text-emerald-700 hover:underline" onClick={onYes}>
-            Yes
+            {isMutatingIncome ? "..." : "Yes"}
           </button>
           <button className="text-slate-500 hover:underline" onClick={() => setDeleteTarget(null)}>
             No
@@ -730,7 +763,7 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
           <Trash2 className="size-4" />
         </button>
       ),
-    [deleteTarget]
+    [deleteTarget, isMutatingIncome]
   );
 
   const sidebar = (
@@ -958,7 +991,7 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
       <div className="space-y-6">
         <PageHeader title="Income Management" actionLabel="Add Income" onAction={() => setModal("income")} />
         <Panel>
-          <p className="text-sm font-semibold text-slate-500">Total Income this month</p>
+          <p className="text-sm font-semibold text-slate-500">Total recorded income</p>
           <p className="mt-2 text-4xl font-bold text-emerald-700">{peso(totals.income)}</p>
         </Panel>
         <Panel>
@@ -1253,11 +1286,11 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
           </div>
         </Panel>
         <Panel className="border-red-200">
-          <SectionTitle title="Danger Zone" subtitle="Remove all local dashboard data" />
+          <SectionTitle title="Danger Zone" subtitle="Remove local demo budgets, expenses, and savings" />
           <div className="mt-5">
             {deleteTarget === "clear-all" ? (
               <div className="flex flex-wrap items-center gap-3">
-                <span className="font-semibold text-red-700">Clear all data?</span>
+                <span className="font-semibold text-red-700">Clear local demo data?</span>
                 <AppButton variant="danger" onClick={clearAllData}>
                   Yes, clear data
                 </AppButton>
@@ -1267,7 +1300,7 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
               </div>
             ) : (
               <AppButton variant="danger" onClick={() => setDeleteTarget("clear-all")}>
-                Clear All Data
+                Clear Demo Data
               </AppButton>
             )}
           </div>
@@ -1429,6 +1462,7 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
                 Cancel
               </AppButton>
               <AppButton
+                disabled={modal === "income" && isMutatingIncome}
                 onClick={
                   modal === "income"
                     ? saveIncome
@@ -1441,7 +1475,7 @@ export function SpendWiseDashboard({ user }: { user: UserProfile }) {
                           : saveContribution
                 }
               >
-                Save
+                {modal === "income" && isMutatingIncome ? "Saving..." : "Save"}
               </AppButton>
             </div>
           ) : (

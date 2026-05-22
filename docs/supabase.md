@@ -551,3 +551,66 @@ Once you finish the dashboard and SQL steps above, your next implementation step
 5. redirect authenticated users into the app
 
 At that point, the existing UI will be fully connected to real Supabase authentication.
+
+## Step 18. Add the First Finance Table: `incomes`
+
+After auth is working, the first finance module to persist should be `public.incomes`.
+
+Use section **7. Create the `incomes` Table** through section **11. Income-Only SQL Block** from [supabase_sql.md](/E:/my-codes/spendwise/supabase_sql.md).
+
+Recommended v1 shape:
+
+- one row per income entry
+- `source` stays free-text for now
+- no unique business key on amount/date/source, because duplicate entries can be legitimate
+- one composite index on:
+  - `user_id`
+  - `received_on desc`
+  - `created_at desc`
+
+That index fits the current app behavior:
+
+- dashboard loads the signed-in user's incomes
+- Income page lists the newest rows first
+- recent transactions can reuse the same order
+
+### Why no unique index yet
+
+It would be unsafe to enforce uniqueness on combinations like:
+
+- `user_id + source + amount + received_on`
+
+because two valid income rows can share those same values, for example:
+
+- two freelance payments on one day
+- split salary deposits
+- repeated cash entries with the same amount
+
+For v1, rely on:
+
+- `id` as the only unique key
+- validation for non-empty `source`
+- validation for `amount > 0`
+
+### How this connects to the other pages
+
+The pages do need to connect through shared finance data, but they should not all write the same table.
+
+Recommended direction:
+
+- `incomes`
+  - drives total income
+- `budgets`
+  - later stores planned limits per category and date period
+- `expenses`
+  - later stores actual spend and links into budget logic
+- `savings_goals` and `savings_contributions`
+  - later store goals and deposits toward those goals
+
+For the current dashboard flow, `Recent Transactions` should eventually become a query that combines:
+
+- incomes
+- expenses
+- savings contributions
+
+Do not create a duplicate catch-all transactions table yet unless you later need an event ledger by design.
