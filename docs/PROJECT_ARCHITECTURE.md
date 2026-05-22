@@ -17,8 +17,8 @@ The current codebase is a mix of implemented backend-connected features and plan
   - protected dashboard access
   - user profile loading from Supabase
   - income persistence in Supabase
+  - budget persistence in Supabase
 - **Planned next**
-  - database-backed budgets
   - database-backed expenses
   - database-backed savings goals and contributions
   - unified recent transactions
@@ -116,7 +116,7 @@ Once the user is inside `/dashboard`, all finance pages are interconnected throu
 | Action | Current behavior | Intended connected effect |
 | --- | --- | --- |
 | Add Income | Saves to `public.incomes` | Updates total income, dashboard analytics, and recent transactions |
-| Create Budget | Local-only modal state | Should later create a budget record and affect budget progress |
+| Create Budget | Saves to `public.budgets` | Updates total budget, budget progress, and budget-aware dashboard views |
 | Add Expense | Local-only modal state | Should later create expense records, reduce budget remaining, and affect charts |
 | Add Savings | Local-only modal state | Should later create savings goal or contribution records and affect savings progress |
 | View Report | Local dashboard report view | Should later summarize persisted monthly finance data |
@@ -145,6 +145,7 @@ Once the user is inside `/dashboard`, all finance pages are interconnected throu
 
 - the dashboard page loads the authenticated user profile from `public.profiles`
 - the dashboard page loads the user income rows from `public.incomes`
+- the dashboard page loads the user budget rows from `public.budgets`
 - recent income transactions are derived server-side from income rows
 - the dashboard client component renders all finance subviews
 - summary cards, charts, tables, and report metrics are computed in the dashboard component
@@ -156,8 +157,8 @@ Once the user is inside `/dashboard`, all finance pages are interconnected throu
 | Auth session | Supabase Auth |
 | User profile | `public.profiles` |
 | Income | `public.incomes` |
+| Budgets | `public.budgets` |
 | Recent income transactions | Derived from `public.incomes` |
-| Budgets | Local client state |
 | Expenses | Local client state |
 | Savings goals | Local client state |
 | Savings contributions | Local client state |
@@ -173,7 +174,8 @@ The dashboard is currently in a transitional state:
 That means some numbers shown together on the dashboard come from different sources:
 
 - income comes from Supabase
-- budgets, expenses, and savings are still mock/local values unless replaced in future work
+- budgets also come from Supabase
+- expenses and savings are still mock/local values unless replaced in future work
 
 ## 5. Database Architecture
 
@@ -249,6 +251,37 @@ Security:
 - RLS enabled
 - users can select, insert, update, and delete only their own income rows
 
+### `public.budgets`
+
+Purpose:
+
+- stores one row per budget category and period
+- supports the current Budgets page and total budget calculation
+
+Relationship:
+
+- one-to-many from user to budget rows
+
+Main columns:
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Budget row UUID |
+| `user_id` | Owner user id |
+| `category` | Free-text budget category |
+| `category_key` | Generated normalized category for overlap rules |
+| `icon` | Stored display icon |
+| `allocated_amount` | Positive allocated amount |
+| `period_start` | Budget start date |
+| `period_end` | Budget end date |
+| `created_at` | Creation timestamp |
+| `updated_at` | Last update timestamp |
+
+Security:
+
+- RLS enabled
+- users can select, insert, update, and delete only their own budget rows
+
 ## 5.2 Shared functions and triggers
 
 ### `public.set_updated_at()`
@@ -261,6 +294,7 @@ Current usage:
 
 - attached to `public.profiles`
 - attached to `public.incomes`
+- attached to `public.budgets`
 
 ### `public.handle_new_user()`
 
@@ -282,6 +316,8 @@ Current trigger flow:
 | `profiles.email` | Unique | No duplicate profile email values |
 | `incomes.id` | Primary key | Unique income row identity |
 | `idx_incomes_user_received_on_desc` | Composite index | Fast user income listing by newest date |
+| `budgets.id` | Primary key | Unique budget row identity |
+| `idx_budgets_user_period_start_desc` | Composite index | Fast user budget listing by newest period |
 
 ### Why `incomes` has no business unique index
 
@@ -377,17 +413,18 @@ This section describes the intended system behavior from `flowchart.md`. It is t
 
 ### Budgets
 
-**Planned next**
+**Implemented now**
 
-Future purpose:
+Current purpose:
 
 - define spending limits by category and period
 - feed budget progress and budget remaining logic
 
-Intended connection:
+Current connection:
 
 - income establishes how much money is available overall
 - budgets define how that money is allocated across categories
+- current budget spent values are still derived from local expenses until expenses are persisted
 
 ### Expenses
 
@@ -490,7 +527,6 @@ In the finished architecture:
 
 ### Current gaps
 
-- budgets are not persisted yet
 - expenses are not persisted yet
 - savings goals are not persisted yet
 - savings contributions are not persisted yet
@@ -499,11 +535,10 @@ In the finished architecture:
 
 ### Recommended next implementation order
 
-1. Create database-backed budget tables and server actions
-2. Create database-backed expense tables and budget linkage
-3. Create savings goal and savings contribution tables
-4. Replace local recent transactions with a unified server query
-5. Move analytics and reporting calculations fully to persisted finance data
+1. Create database-backed expense tables and budget linkage
+2. Create savings goal and savings contribution tables
+3. Replace local recent transactions with a unified server query
+4. Move analytics and reporting calculations fully to persisted finance data
 
 ### Route-level architectural note
 

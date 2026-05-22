@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { SpendWiseDashboard } from "@/components/spendwise-dashboard";
+import { listUserBudgets } from "@/lib/budgets";
 import { toIncomeTransaction } from "@/lib/income-shared";
 import { listUserIncomes } from "@/lib/incomes";
 import { createClient } from "@/lib/supabase/server";
@@ -27,11 +28,18 @@ export default async function DashboardPage() {
     profile?.email ??
     (typeof claims.email === "string" ? claims.email : "No email available");
   let incomes: Awaited<ReturnType<typeof listUserIncomes>> = [];
+  let budgets: Awaited<ReturnType<typeof listUserBudgets>> = [];
 
   try {
     incomes = await listUserIncomes();
   } catch (error) {
     console.error("Could not load incomes for dashboard.", error);
+  }
+
+  try {
+    budgets = await listUserBudgets();
+  } catch (error) {
+    console.error("Could not load budgets for dashboard.", error);
   }
 
   const recentTransactions = incomes
@@ -44,6 +52,7 @@ export default async function DashboardPage() {
     <SpendWiseDashboard
       user={{ name: fullName, email }}
       initialIncomes={incomes}
+      initialBudgets={budgets}
       initialTransactions={recentTransactions}
       todayIso={todayIso}
     />

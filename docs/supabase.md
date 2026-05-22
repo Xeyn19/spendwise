@@ -266,7 +266,7 @@ Open:
 
 - `SQL Editor`
 
-Run section **1. Create the `profiles` Table** from [supabase_sql.md](/E:/my-codes/spendwise/supabase_sql.md).
+Run section **1. Create the `profiles` Table** from [supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md).
 
 ### What this table does
 
@@ -282,7 +282,7 @@ Run section **1. Create the `profiles` Table** from [supabase_sql.md](/E:/my-cod
 
 ## Step 6. Create the `updated_at` Trigger
 
-Run section **2. Create the `updated_at` Trigger Function** from [supabase_sql.md](/E:/my-codes/spendwise/supabase_sql.md).
+Run section **2. Create the `updated_at` Trigger Function** from [supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md).
 
 ### Why this matters
 
@@ -297,7 +297,7 @@ When a user signs up, you want:
 - Supabase Auth to create the account
 - your app database to create the matching `profiles` row automatically
 
-Run section **3. Create the Automatic Profile-Insert Trigger** from [supabase_sql.md](/E:/my-codes/spendwise/supabase_sql.md).
+Run section **3. Create the Automatic Profile-Insert Trigger** from [supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md).
 
 ### Why metadata matters
 
@@ -321,7 +321,7 @@ That is exactly what this trigger reads:
 
 Now secure the table.
 
-Run section **4. Enable Row Level Security** from [supabase_sql.md](/E:/my-codes/spendwise/supabase_sql.md).
+Run section **4. Enable Row Level Security** from [supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md).
 
 Without RLS, your table is not protected correctly for app users.
 
@@ -333,11 +333,11 @@ Official background:
 
 ### 9.1 Allow users to view only their own profile
 
-Run section **5.1 Allow users to view only their own profile** from [supabase_sql.md](/E:/my-codes/spendwise/supabase_sql.md).
+Run section **5.1 Allow users to view only their own profile** from [supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md).
 
 ### 9.2 Allow users to update only their own profile
 
-Run section **5.2 Allow users to update only their own profile** from [supabase_sql.md](/E:/my-codes/spendwise/supabase_sql.md).
+Run section **5.2 Allow users to update only their own profile** from [supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md).
 
 ### 9.3 Do you need an insert policy?
 
@@ -556,7 +556,7 @@ At that point, the existing UI will be fully connected to real Supabase authenti
 
 After auth is working, the first finance module to persist should be `public.incomes`.
 
-Use section **7. Create the `incomes` Table** through section **11. Income-Only SQL Block** from [supabase_sql.md](/E:/my-codes/spendwise/supabase_sql.md).
+Use section **7. Create the `incomes` Table** through section **11. Income-Only SQL Block** from [supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md).
 
 Recommended v1 shape:
 
@@ -614,3 +614,30 @@ For the current dashboard flow, `Recent Transactions` should eventually become a
 - savings contributions
 
 Do not create a duplicate catch-all transactions table yet unless you later need an event ledger by design.
+
+## Step 19. Add the Budget Table
+
+After income is connected, the next finance module to persist is `public.budgets`.
+
+Use section **12. Create the `budgets` Table** through section **16. Budget-Only SQL Block** from [supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md).
+
+Recommended v1 shape:
+
+- one row per budget
+- free-text `category`
+- stored `icon`
+- `allocated_amount`
+- `period_start`
+- `period_end`
+
+Important rules in this design:
+
+- budget periods are custom date ranges
+- the same user cannot have overlapping budgets for the same category
+- budgets are blocked when same-period allocations exceed same-period recorded income
+
+This gives the app a stable base for:
+
+- real Budget page data
+- dashboard total budget values
+- future expense-to-budget matching by category and date range

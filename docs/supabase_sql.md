@@ -2,7 +2,7 @@
 
 This file contains the SQL you need to run in the Supabase SQL Editor for the SpendWise auth setup.
 
-Use it together with [supabase.md](/E:/my-codes/spendwise/supabase.md).
+Use it together with [supabase.md](/E:/my-codes/spendwise/docs/supabase.md).
 
 ## Recommended Order
 
@@ -361,6 +361,190 @@ with check ((select auth.uid()) = user_id);
 drop policy if exists "Users can delete own incomes" on public.incomes;
 create policy "Users can delete own incomes"
 on public.incomes
+for delete
+to authenticated
+using ((select auth.uid()) = user_id);
+```
+
+## 12. Create the `budgets` Table
+
+```sql
+create extension if not exists pgcrypto;
+create extension if not exists btree_gist;
+
+create table if not exists public.budgets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  category text not null,
+  category_key text generated always as (lower(btrim(category))) stored,
+  icon text not null,
+  allocated_amount numeric(12, 2) not null,
+  period_start date not null,
+  period_end date not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint budgets_category_not_blank check (btrim(category) <> ''),
+  constraint budgets_icon_not_blank check (btrim(icon) <> ''),
+  constraint budgets_amount_positive check (allocated_amount > 0),
+  constraint budgets_period_valid check (period_end >= period_start),
+  constraint budgets_no_category_overlap exclude using gist (
+    user_id with =,
+    category_key with =,
+    daterange(period_start, period_end, '[]') with &&
+  )
+);
+
+create index if not exists idx_budgets_user_period_start_desc
+  on public.budgets (user_id, period_start desc, created_at desc);
+```
+
+## 13. Attach the `updated_at` Trigger to `budgets`
+
+This reuses the existing `public.set_updated_at()` function from section 2.
+
+```sql
+drop trigger if exists set_budgets_updated_at on public.budgets;
+
+create trigger set_budgets_updated_at
+before update on public.budgets
+for each row
+execute function public.set_updated_at();
+```
+
+## 14. Enable Row Level Security for `budgets`
+
+```sql
+alter table public.budgets enable row level security;
+```
+
+## 15. Create RLS Policies for `budgets`
+
+### 15.1 Allow users to view only their own budget rows
+
+```sql
+drop policy if exists "Users can view own budgets" on public.budgets;
+
+create policy "Users can view own budgets"
+on public.budgets
+for select
+to authenticated
+using ((select auth.uid()) = user_id);
+```
+
+### 15.2 Allow users to insert only their own budget rows
+
+```sql
+drop policy if exists "Users can insert own budgets" on public.budgets;
+
+create policy "Users can insert own budgets"
+on public.budgets
+for insert
+to authenticated
+with check ((select auth.uid()) = user_id);
+```
+
+### 15.3 Allow users to update only their own budget rows
+
+```sql
+drop policy if exists "Users can update own budgets" on public.budgets;
+
+create policy "Users can update own budgets"
+on public.budgets
+for update
+to authenticated
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);
+```
+
+### 15.4 Allow users to delete only their own budget rows
+
+```sql
+drop policy if exists "Users can delete own budgets" on public.budgets;
+
+create policy "Users can delete own budgets"
+on public.budgets
+for delete
+to authenticated
+using ((select auth.uid()) = user_id);
+```
+
+## 16. Budget-Only SQL Block
+
+Run this after the existing profile and income setup if you want only the budget schema:
+
+```sql
+create extension if not exists pgcrypto;
+create extension if not exists btree_gist;
+
+create table if not exists public.budgets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  category text not null,
+  category_key text generated always as (lower(btrim(category))) stored,
+  icon text not null,
+  allocated_amount numeric(12, 2) not null,
+  period_start date not null,
+  period_end date not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint budgets_category_not_blank check (btrim(category) <> ''),
+  constraint budgets_icon_not_blank check (btrim(icon) <> ''),
+  constraint budgets_amount_positive check (allocated_amount > 0),
+  constraint budgets_period_valid check (period_end >= period_start),
+  constraint budgets_no_category_overlap exclude using gist (
+    user_id with =,
+    category_key with =,
+    daterange(period_start, period_end, '[]') with &&
+  )
+);
+
+create index if not exists idx_budgets_user_period_start_desc
+  on public.budgets (user_id, period_start desc, created_at desc);
+
+alter table public.budgets enable row level security;
+
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists set_budgets_updated_at on public.budgets;
+
+create trigger set_budgets_updated_at
+before update on public.budgets
+for each row
+execute function public.set_updated_at();
+
+drop policy if exists "Users can view own budgets" on public.budgets;
+create policy "Users can view own budgets"
+on public.budgets
+for select
+to authenticated
+using ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can insert own budgets" on public.budgets;
+create policy "Users can insert own budgets"
+on public.budgets
+for insert
+to authenticated
+with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can update own budgets" on public.budgets;
+create policy "Users can update own budgets"
+on public.budgets
+for update
+to authenticated
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can delete own budgets" on public.budgets;
+create policy "Users can delete own budgets"
+on public.budgets
 for delete
 to authenticated
 using ((select auth.uid()) = user_id);

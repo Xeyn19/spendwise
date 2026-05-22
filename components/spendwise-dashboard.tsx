@@ -38,8 +38,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { createIncomeAction, deleteIncomeAction } from "@/app/dashboard/actions";
+import {
+  createBudgetAction,
+  createIncomeAction,
+  deleteBudgetAction,
+  deleteIncomeAction,
+  updateBudgetAction,
+} from "@/app/dashboard/actions";
 import { ThemeToggle } from "@/components/theme-toggle";
+import type { BudgetRecord } from "@/lib/budget-shared";
 import type { IncomeRecord, IncomeTransaction } from "@/lib/income-shared";
 import { toIncomeTransaction } from "@/lib/income-shared";
 
@@ -55,12 +62,12 @@ type ActivePage =
 
 type Income = IncomeRecord;
 
-type Budget = {
-  id: number;
-  category: string;
-  icon: string;
+type StoredBudget = BudgetRecord;
+
+type Budget = StoredBudget & {
   allocated: number;
   spent: number;
+  remaining: number;
 };
 
 type Expense = {
@@ -104,7 +111,13 @@ const navItems: Array<{ page: ActivePage; icon: React.ElementType }> = [
   { page: "Reports", icon: FileText },
 ];
 
-const initialBudgets: Budget[] = [
+const initialBudgets: Array<{
+  id: number;
+  category: string;
+  icon: string;
+  allocated: number;
+  spent: number;
+}> = [
   { id: 1, category: "Food", icon: "🍽️", allocated: 5000, spent: 2000 },
   { id: 2, category: "Transport", icon: "🚗", allocated: 3000, spent: 800 },
   { id: 3, category: "Shopping", icon: "🛍️", allocated: 4000, spent: 1500 },
@@ -153,6 +166,33 @@ function sortIncomes(rows: Income[]) {
 
 function incomeTransactions(rows: Income[]) {
   return sortIncomes(rows).map(toIncomeTransaction);
+}
+
+function sortBudgetRecords(rows: StoredBudget[]) {
+  return [...rows].sort((a, b) => {
+    const dateOrder = b.periodStart.localeCompare(a.periodStart);
+    return dateOrder !== 0 ? dateOrder : b.createdAt.localeCompare(a.createdAt);
+  });
+}
+
+function formatBudgetDate(value: string) {
+  return new Date(`${value}T00:00:00`).toLocaleDateString("en-PH", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function initialBudgetsFallback(): StoredBudget[] {
+  return initialBudgets.map((budget, index) => ({
+    id: `demo-budget-${index + 1}`,
+    category: budget.category,
+    icon: budget.icon,
+    allocatedAmount: budget.allocated,
+    periodStart: "2026-05-01",
+    periodEnd: "2026-05-31",
+    createdAt: `2026-05-0${index + 1}T00:00:00.000Z`,
+  }));
 }
 
 function pct(value: number, total: number) {
@@ -301,11 +341,13 @@ function EmptyState({ message }: { message: string }) {
 export function SpendWiseDashboard({
   user,
   initialIncomes,
+  initialBudgets,
   initialTransactions,
   todayIso,
 }: {
   user: UserProfile;
   initialIncomes: Income[];
+  initialBudgets: StoredBudget[];
   initialTransactions: IncomeTransaction[];
   todayIso: string;
 }) {
@@ -335,9 +377,14 @@ export function SpendWiseDashboard({
   const [compactCurrency, setCompactCurrency] = React.useState(false);
   const [notifications, setNotifications] = React.useState(true);
   const [isMutatingIncome, startIncomeMutation] = React.useTransition();
+  const [isMutatingBudget, startBudgetMutation] = React.useTransition();
 
   const [incomes, setIncomes] = React.useState<Income[]>(initialIncomes);
-  const [budgets, setBudgets] = React.useState<Budget[]>(initialBudgets);
+  const [budgetRecords, setBudgetRecords] = React.useState<StoredBudget[]>(
+    initialBudgets.length > 0
+      ? initialBudgets
+      : initialBudgetsFallback().slice(0, 0)
+  );
   const [expenses, setExpenses] = React.useState<Expense[]>(initialExpenses);
   const [savingsGoals, setSavingsGoals] = React.useState<SavingsGoal[]>(initialSavingsGoals);
   const [transactions, setTransactions] = React.useState<Transaction[]>(() => [
@@ -360,6 +407,8 @@ export function SpendWiseDashboard({
     budgetCategory: "",
     budgetAmount: "",
     budgetIcon: iconOptions[0],
+    budgetStartDate: todayIso,
+    budgetEndDate: todayIso,
     expenseCategory: "Food",
     expenseAmount: "",
     expenseDate: todayIso,
@@ -395,6 +444,28 @@ export function SpendWiseDashboard({
         year: "numeric",
       }),
     [todayIso]
+  );
+
+  const budgets = React.useMemo<Budget[]>(
+    () =>
+      sortBudgetRecords(budgetRecords).map((budget) => {
+        const spent = expenses
+          .filter(
+            (expense) =>
+              expense.category === budget.category &&
+              expense.date >= budget.periodStart &&
+              expense.date <= budget.periodEnd
+          )
+          .reduce((sum, expense) => sum + expense.amount, 0);
+
+        return {
+          ...budget,
+          allocated: budget.allocatedAmount,
+          spent,
+          remaining: Math.max(0, budget.allocatedAmount - spent),
+        };
+      }),
+    [budgetRecords, expenses]
   );
 
   const totals = React.useMemo(() => {
@@ -525,8 +596,10 @@ export function SpendWiseDashboard({
       setForms((current) => ({
         ...current,
         budgetCategory: budget.category,
-        budgetAmount: String(budget.allocated),
+        budgetAmount: String(budget.allocatedAmount),
         budgetIcon: budget.icon,
+        budgetStartDate: budget.periodStart,
+        budgetEndDate: budget.periodEnd,
       }));
     } else {
       setEditingBudget(null);
@@ -535,11 +608,13 @@ export function SpendWiseDashboard({
         budgetCategory: "",
         budgetAmount: "",
         budgetIcon: iconOptions[0],
+        budgetStartDate: todayIso,
+        budgetEndDate: todayIso,
       }));
     }
     setErrors({});
     setModal("budget");
-  }, []);
+  }, [todayIso]);
 
   const openContributionModal = React.useCallback((goal: SavingsGoal) => {
     setContributionGoal(goal);
@@ -588,33 +663,55 @@ export function SpendWiseDashboard({
     const amount = Number(forms.budgetAmount);
     if (!forms.budgetCategory.trim()) nextErrors.budgetCategory = "Category is required.";
     if (!amount || amount <= 0) nextErrors.budgetAmount = "Amount must be greater than 0.";
+    if (!forms.budgetStartDate) nextErrors.budgetStartDate = "Start date is required.";
+    if (!forms.budgetEndDate) nextErrors.budgetEndDate = "End date is required.";
+    if (forms.budgetStartDate && forms.budgetEndDate && forms.budgetEndDate < forms.budgetStartDate) {
+      nextErrors.budgetEndDate = "End date must be on or after the start date.";
+    }
     if (Object.keys(nextErrors).length) {
       setErrors(nextErrors);
       return;
     }
 
-    if (editingBudget) {
-      setBudgets((current) =>
-        current.map((budget) =>
-          budget.id === editingBudget.id
-            ? { ...budget, category: forms.budgetCategory.trim(), allocated: amount, icon: forms.budgetIcon }
-            : budget
+    const formData = new FormData();
+    formData.set("category", forms.budgetCategory.trim());
+    formData.set("allocatedAmount", String(amount));
+    formData.set("icon", forms.budgetIcon);
+    formData.set("periodStart", forms.budgetStartDate);
+    formData.set("periodEnd", forms.budgetEndDate);
+
+    startBudgetMutation(async () => {
+      const result = editingBudget
+        ? await updateBudgetAction(editingBudget.id, formData)
+        : await createBudgetAction(formData);
+
+      if (!result.success || !result.budget) {
+        toast.error(result.message ?? "Could not save budget.");
+        return;
+      }
+
+      const budget = result.budget;
+
+      setBudgetRecords((current) =>
+        sortBudgetRecords(
+          editingBudget
+            ? current.map((item) => (item.id === editingBudget.id ? budget : item))
+            : [budget, ...current]
         )
       );
-    } else {
-      setBudgets((current) => [
-        ...current,
-        {
-          id: Date.now(),
-          category: forms.budgetCategory.trim(),
-          icon: forms.budgetIcon,
-          allocated: amount,
-          spent: 0,
-        },
-      ]);
-    }
-    resetModal();
-  }, [editingBudget, forms.budgetAmount, forms.budgetCategory, forms.budgetIcon, resetModal]);
+      resetModal();
+      toast.success(editingBudget ? "Budget updated." : "Budget saved.");
+    });
+  }, [
+    editingBudget,
+    forms.budgetAmount,
+    forms.budgetCategory,
+    forms.budgetEndDate,
+    forms.budgetIcon,
+    forms.budgetStartDate,
+    resetModal,
+    startBudgetMutation,
+  ]);
 
   const saveExpense = React.useCallback(() => {
     const nextErrors: Record<string, string> = {};
@@ -635,11 +732,6 @@ export function SpendWiseDashboard({
       note: forms.expenseNote.trim(),
     };
     setExpenses((current) => [expense, ...current]);
-    setBudgets((current) =>
-      current.map((budget) =>
-        budget.category === expense.category ? { ...budget, spent: budget.spent + expense.amount } : budget
-      )
-    );
     addTransaction({
       date: expense.date,
       type: "Expense",
@@ -718,13 +810,6 @@ export function SpendWiseDashboard({
 
   const deleteExpense = React.useCallback((expense: Expense) => {
     setExpenses((current) => current.filter((item) => item.id !== expense.id));
-    setBudgets((current) =>
-      current.map((budget) =>
-        budget.category === expense.category
-          ? { ...budget, spent: Math.max(0, budget.spent - expense.amount) }
-          : budget
-      )
-    );
     setTransactions((current) =>
       current.filter(
         (transaction) =>
@@ -734,8 +819,22 @@ export function SpendWiseDashboard({
     setDeleteTarget(null);
   }, []);
 
+  const deleteBudget = React.useCallback((budget: Budget) => {
+    startBudgetMutation(async () => {
+      const result = await deleteBudgetAction(budget.id);
+
+      if (!result.success) {
+        toast.error(result.message ?? "Could not delete budget.");
+        return;
+      }
+
+      setBudgetRecords((current) => current.filter((item) => item.id !== budget.id));
+      setDeleteTarget(null);
+      toast.success("Budget deleted.");
+    });
+  }, []);
+
   const clearAllData = React.useCallback(() => {
-    setBudgets([]);
     setExpenses([]);
     setSavingsGoals([]);
     setTransactions(incomeTransactions(incomes));
@@ -748,7 +847,7 @@ export function SpendWiseDashboard({
         <div className="flex items-center gap-2 text-xs font-semibold">
           <span className="text-slate-500">Are you sure?</span>
           <button className="text-emerald-700 hover:underline" onClick={onYes}>
-            {isMutatingIncome ? "..." : "Yes"}
+            {isMutatingIncome || isMutatingBudget ? "..." : "Yes"}
           </button>
           <button className="text-slate-500 hover:underline" onClick={() => setDeleteTarget(null)}>
             No
@@ -763,7 +862,7 @@ export function SpendWiseDashboard({
           <Trash2 className="size-4" />
         </button>
       ),
-    [deleteTarget, isMutatingIncome]
+    [deleteTarget, isMutatingBudget, isMutatingIncome]
   );
 
   const sidebar = (
@@ -1038,22 +1137,22 @@ export function SpendWiseDashboard({
                   <p className="mt-1 text-sm text-slate-500">
                     {peso(budget.allocated)} allocated · {peso(budget.spent)} spent
                   </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {formatBudgetDate(budget.periodStart)} - {formatBudgetDate(budget.periodEnd)}
+                  </p>
                 </div>
                 <div className="flex items-center gap-1">
                   <button className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-900" onClick={() => openBudgetModal(budget)}>
                     <Edit2 className="size-4" />
                   </button>
-                  {renderDeleteConfirm(`budget-${budget.id}`, () => {
-                    setBudgets((current) => current.filter((item) => item.id !== budget.id));
-                    setDeleteTarget(null);
-                  })}
+                  {renderDeleteConfirm(`budget-${budget.id}`, () => deleteBudget(budget))}
                 </div>
               </div>
               <div className="mt-5">
                 <ProgressBar value={pct(budget.spent, budget.allocated)} tone={barTone(pct(budget.spent, budget.allocated))} />
                 <div className="mt-2 flex justify-between text-sm font-semibold">
                   <span>{pct(budget.spent, budget.allocated)}%</span>
-                  <span className="text-slate-500">{peso(Math.max(0, budget.allocated - budget.spent))} left</span>
+                  <span className="text-slate-500">{peso(budget.remaining)} left</span>
                 </div>
               </div>
             </Panel>
@@ -1286,11 +1385,11 @@ export function SpendWiseDashboard({
           </div>
         </Panel>
         <Panel className="border-red-200">
-          <SectionTitle title="Danger Zone" subtitle="Remove local demo budgets, expenses, and savings" />
+          <SectionTitle title="Danger Zone" subtitle="Remove local demo expenses and savings" />
           <div className="mt-5">
             {deleteTarget === "clear-all" ? (
               <div className="flex flex-wrap items-center gap-3">
-                <span className="font-semibold text-red-700">Clear local demo data?</span>
+                <span className="font-semibold text-red-700">Clear local expenses and savings?</span>
                 <AppButton variant="danger" onClick={clearAllData}>
                   Yes, clear data
                 </AppButton>
@@ -1361,6 +1460,14 @@ export function SpendWiseDashboard({
                 <Field label="Allocated Amount" error={errors.budgetAmount}>
                   <TextInput type="number" value={forms.budgetAmount} invalid={!!errors.budgetAmount} onChange={(e) => updateForm("budgetAmount", e.target.value)} placeholder="₱0" />
                 </Field>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Start Date" error={errors.budgetStartDate}>
+                    <TextInput type="date" value={forms.budgetStartDate} invalid={!!errors.budgetStartDate} onChange={(e) => updateForm("budgetStartDate", e.target.value)} />
+                  </Field>
+                  <Field label="End Date" error={errors.budgetEndDate}>
+                    <TextInput type="date" value={forms.budgetEndDate} invalid={!!errors.budgetEndDate} onChange={(e) => updateForm("budgetEndDate", e.target.value)} />
+                  </Field>
+                </div>
                 <Field label="Icon">
                   <div className="flex flex-wrap gap-2">
                     {iconOptions.map((icon) => (
@@ -1378,11 +1485,6 @@ export function SpendWiseDashboard({
                     ))}
                   </div>
                 </Field>
-                {Number(forms.budgetAmount) + budgets.filter((budget) => budget.id !== editingBudget?.id).reduce((sum, budget) => sum + budget.allocated, 0) > totals.income ? (
-                  <p className="rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-700">
-                    Warning: total budgets will exceed total income.
-                  </p>
-                ) : null}
               </>
             ) : null}
 
@@ -1462,7 +1564,7 @@ export function SpendWiseDashboard({
                 Cancel
               </AppButton>
               <AppButton
-                disabled={modal === "income" && isMutatingIncome}
+                disabled={(modal === "income" && isMutatingIncome) || (modal === "budget" && isMutatingBudget)}
                 onClick={
                   modal === "income"
                     ? saveIncome
@@ -1475,7 +1577,11 @@ export function SpendWiseDashboard({
                           : saveContribution
                 }
               >
-                {modal === "income" && isMutatingIncome ? "Saving..." : "Save"}
+                {modal === "income" && isMutatingIncome
+                  ? "Saving..."
+                  : modal === "budget" && isMutatingBudget
+                    ? "Saving..."
+                    : "Save"}
               </AppButton>
             </div>
           ) : (
@@ -1655,7 +1761,10 @@ function BudgetProgress({ budget }: { budget: Budget }) {
           <div>
             <h3 className="font-bold text-foreground dark:text-white">{budget.category} Budget</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Allocated {peso(budget.allocated)} | Spent {peso(budget.spent)} | Remaining {peso(Math.max(0, budget.allocated - budget.spent))}
+              Allocated {peso(budget.allocated)} | Spent {peso(budget.spent)} | Remaining {peso(budget.remaining)}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {formatBudgetDate(budget.periodStart)} - {formatBudgetDate(budget.periodEnd)}
             </p>
           </div>
         </div>
