@@ -1,62 +1,99 @@
 # SpendWise Project Architecture
 
-## 1. Project Overview
+## 1. Overview
 
-SpendWise is a Next.js finance application with three main layers:
+SpendWise is a Next.js 16 App Router application for personal finance tracking. The project combines:
 
-1. Public marketing pages for product presentation and contact
-2. Authentication pages backed by Supabase Auth
-3. A protected dashboard workspace for personal finance workflows
+- a public marketing site
+- Supabase-backed authentication
+- a protected dashboard workspace
+- database-backed finance modules for incomes, budgets, and expenses
+- local/demo-only savings, analytics, and reporting layers that are still being completed
 
-The current codebase is a mix of implemented backend-connected features and planned finance modules:
+The current architecture is intentionally hybrid:
 
-- **Implemented now**
-  - marketing pages
-  - login and registration
-  - email confirmation flow
-  - protected dashboard access
-  - user profile loading from Supabase
-  - income persistence in Supabase
-  - budget persistence in Supabase
-- **Planned next**
-  - database-backed expenses
-  - database-backed savings goals and contributions
-  - unified recent transactions
-  - fully database-driven analytics and reports
+- **implemented and persisted**
+  - authentication
+  - profile storage
+  - incomes
+  - budgets
+  - expenses
+- **implemented in UI but not yet persisted**
+  - savings goals
+  - savings contributions
+- **implemented as derived views**
+  - dashboard summaries
+  - budget progress
+  - recent transactions
+  - analytics cards
+  - report view
 
-### Main stack
+## 2. Stack
 
 | Layer | Technology |
 | --- | --- |
-| App framework | Next.js 16 App Router |
-| UI | React 19 |
-| Styling | Tailwind CSS, custom components, shadcn-style UI primitives |
-| Auth | Supabase Auth |
+| Framework | Next.js 16 App Router |
+| Rendering | React 19 |
+| Styling | Tailwind CSS 4 |
+| UI primitives | shadcn-style local components + Radix primitives |
+| Authentication | Supabase Auth |
 | Database | Supabase Postgres |
-| Server mutations | Next.js Server Actions |
+| Server data writes | Next.js Server Actions |
+| Charts | Recharts |
+| Notifications | Sonner |
 
-## 2. Route and Page Structure
+## 3. High-Level System Design
 
-### Public and auth routes
+SpendWise is split into three major runtime areas:
 
-| Route | Purpose | Access |
-| --- | --- | --- |
-| `/` | Marketing landing page | Public |
-| `/contact` | Contact and inquiry page | Public |
-| `/login` | User login page | Public |
-| `/register` | User registration page | Public |
-| `/auth/confirm` | Email confirmation status page | Public |
-| `/auth/confirm/verify` | Confirmation token verification route | Public |
-| `/auth/signout` | Logout route | Authenticated user session |
-| `/dashboard` | Protected finance workspace | Authenticated |
+1. **Marketing surface**
+   - public landing page and contact page
+   - no authentication required
 
-### Dashboard page structure
+2. **Auth surface**
+   - register, login, confirm-email flow
+   - session creation and protected redirects
 
-The dashboard is currently a single protected Next.js route:
+3. **Dashboard surface**
+   - authenticated-only finance workspace
+   - all finance subpages currently live inside one `/dashboard` route as client-side views
 
-- `/dashboard`
+At runtime, Supabase handles identity and row ownership, while the app handles:
 
-Inside that route, the finance sections are rendered as **client-side subviews** inside `components/spendwise-dashboard.tsx`:
+- session-aware rendering
+- server-side loading of protected finance data
+- form validation
+- mutation orchestration
+- derived metrics and visualizations
+
+## 4. Route Architecture
+
+### Public routes
+
+| Route | Purpose |
+| --- | --- |
+| `/` | Marketing landing page |
+| `/contact` | Contact page |
+
+### Auth routes
+
+| Route | Purpose |
+| --- | --- |
+| `/login` | Sign in |
+| `/register` | Sign up |
+| `/auth/confirm` | Confirmation status page |
+| `/auth/confirm/verify` | OTP verification endpoint |
+| `/auth/signout` | Sign out route |
+
+### Protected routes
+
+| Route | Purpose |
+| --- | --- |
+| `/dashboard` | Authenticated finance workspace |
+
+### Important routing note
+
+The dashboard is a single filesystem route today. The sidebar pages are not independent route segments yet. These sections are rendered inside `components/spendwise-dashboard.tsx`:
 
 - Dashboard
 - Income
@@ -67,522 +104,458 @@ Inside that route, the finance sections are rendered as **client-side subviews**
 - Reports
 - Settings
 
-Important:
+This keeps the current implementation simple, but it also means:
 
-- These are **not** separate filesystem routes yet
-- Navigation between them is local component state
-- The sidebar changes the active subview without leaving `/dashboard`
+- page state is local to the dashboard component
+- there is no deep-linking per finance subpage yet
+- server data for all current finance views is loaded through `/dashboard`
 
-## 3. User Journey and Page Interconnection
+## 5. Authentication Architecture
 
-### End-to-end flow
+### Authentication model
 
-```txt
-Visitor -> Landing Page -> Register or Login
-Register -> Supabase Auth Signup -> Email Confirmation -> Login -> Dashboard
-Login -> Session Created -> Dashboard
-Dashboard -> Sidebar / Quick Actions -> Finance Subviews and Mutations
-```
+SpendWise uses Supabase Auth with email/password authentication.
 
-### Public to auth flow
+The model is:
 
-1. A visitor lands on `/`
-2. They can move to `/register` or `/login`
-3. The auth layout blocks logged-in users from staying on auth pages
-4. Authenticated users are redirected to `/dashboard`
+- `auth.users`
+  - authentication identity
+- `public.profiles`
+  - app-facing profile data
 
-### Signup and confirmation flow
+### Auth request flow
 
-1. User submits the register form
-2. Server action calls Supabase `signUp`
-3. Signup metadata includes `first_name` and `last_name`
-4. Supabase creates `auth.users`
-5. Database trigger creates the matching `public.profiles` row
-6. Supabase sends a confirmation email
-7. User opens `/auth/confirm`
-8. `/auth/confirm/verify` exchanges the token and finalizes the session
-9. User continues into `/dashboard`
+#### Register
 
-### Dashboard as the central hub
+1. User submits the register form.
+2. `app/(auth)/actions.ts` calls `supabase.auth.signUp`.
+3. Signup metadata includes:
+   - `first_name`
+   - `last_name`
+4. `emailRedirectTo` is derived from request headers so the correct base URL is used in local or deployed environments.
+5. Supabase creates the auth user.
+6. Database trigger inserts a matching `public.profiles` row.
+7. Supabase sends a confirmation email.
 
-Once the user is inside `/dashboard`, all finance pages are interconnected through the dashboard shell:
+#### Confirm email
 
-- sidebar navigation changes the active page
-- quick actions open finance modals
-- finance data affects totals, charts, transactions, and reports
+1. User opens `/auth/confirm?...`.
+2. The page renders the confirmation UI.
+3. The client posts to `/auth/confirm/verify`.
+4. The route handler calls `supabase.auth.verifyOtp`.
+5. On success, session cookies are established and the user can continue to the dashboard.
 
-### Quick action interconnection
+#### Login
 
-| Action | Current behavior | Intended connected effect |
-| --- | --- | --- |
-| Add Income | Saves to `public.incomes` | Updates total income, dashboard analytics, and recent transactions |
-| Create Budget | Saves to `public.budgets` | Updates total budget, budget progress, and budget-aware dashboard views |
-| Add Expense | Local-only modal state | Should later create expense records, reduce budget remaining, and affect charts |
-| Add Savings | Local-only modal state | Should later create savings goal or contribution records and affect savings progress |
-| View Report | Local dashboard report view | Should later summarize persisted monthly finance data |
+1. User submits the login form.
+2. `loginAction` calls `supabase.auth.signInWithPassword`.
+3. On success, the user is redirected to `/dashboard?login=success`.
 
-## 4. Current Application Logic
+### Session management
 
-## 4.1 Auth logic
+Session refresh and cookie synchronization are handled by:
 
-**Implemented now**
+- [proxy.ts](/E:/my-codes/spendwise/proxy.ts:1)
+- [lib/supabase/proxy.ts](/E:/my-codes/spendwise/lib/supabase/proxy.ts:1)
 
-- `app/(auth)/actions.ts` contains the register and login server actions
-- register action:
-  - reads form data
-  - calls Supabase `auth.signUp`
-  - sends `first_name` and `last_name` as metadata
-  - sets `emailRedirectTo`
-- login action:
-  - calls Supabase `auth.signInWithPassword`
-  - redirects to `/dashboard?login=success`
+This proxy layer:
+
+- builds a Supabase server client per request
+- reads incoming cookies
+- writes updated auth cookies back to the response
+- refreshes claims through `supabase.auth.getClaims()`
+
+### Auth access control
+
 - `app/(auth)/layout.tsx` redirects authenticated users away from `/login` and `/register`
 - `app/dashboard/page.tsx` redirects unauthenticated users to `/login`
+- all finance server actions verify auth claims before reading or mutating user data
 
-## 4.2 Dashboard logic
+## 6. Supabase Client Architecture
 
-**Implemented now**
+The app uses two primary Supabase client helpers.
 
-- the dashboard page loads the authenticated user profile from `public.profiles`
-- the dashboard page loads the user income rows from `public.incomes`
-- the dashboard page loads the user budget rows from `public.budgets`
-- recent income transactions are derived server-side from income rows
-- the dashboard client component renders all finance subviews
-- summary cards, charts, tables, and report metrics are computed in the dashboard component
+### Browser client
 
-### Current state split
+File:
 
-| Module | Current source of truth |
-| --- | --- |
-| Auth session | Supabase Auth |
-| User profile | `public.profiles` |
-| Income | `public.incomes` |
-| Budgets | `public.budgets` |
-| Recent income transactions | Derived from `public.incomes` |
-| Expenses | Local client state |
-| Savings goals | Local client state |
-| Savings contributions | Local client state |
-| Most analytics and reports | Derived from mixed data, mostly local state |
-
-### Important implementation truth
-
-The dashboard is currently in a transitional state:
-
-- income is real database-backed data
-- most other finance modules are still dashboard-local demo state
-
-That means some numbers shown together on the dashboard come from different sources:
-
-- income comes from Supabase
-- budgets also come from Supabase
-- expenses and savings are still mock/local values unless replaced in future work
-
-## 5. Database Architecture
-
-## 5.1 Current tables
-
-### `auth.users`
-
-Managed by Supabase Auth.
+- [lib/supabase/client.ts](/E:/my-codes/spendwise/lib/supabase/client.ts:1)
 
 Purpose:
 
-- stores the actual authentication identity
-- powers login session ownership
+- create a browser-safe Supabase client using the project URL and publishable key
+
+### Server client
+
+File:
+
+- [lib/supabase/server.ts](/E:/my-codes/spendwise/lib/supabase/server.ts:1)
+
+Purpose:
+
+- create a request-bound server client using Next.js cookies
+- support protected server rendering and server actions
+
+### Shared config
+
+File:
+
+- [lib/supabase/config.ts](/E:/my-codes/spendwise/lib/supabase/config.ts:1)
+
+Behavior:
+
+- requires `NEXT_PUBLIC_SUPABASE_URL`
+- accepts either:
+  - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+  - or fallback `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+## 7. Data Model
+
+## 7.1 Current persisted tables
 
 ### `public.profiles`
 
 Purpose:
 
-- stores app-level user profile information
-- extends the auth identity with business-facing fields
+- stores app-facing profile information
 
-Relationship:
-
-- one-to-one with `auth.users`
-
-Main columns:
+Columns:
 
 | Column | Meaning |
 | --- | --- |
 | `id` | Same UUID as `auth.users.id` |
 | `email` | User email |
-| `first_name` | First name from signup metadata |
-| `last_name` | Last name from signup metadata |
-| `created_at` | Creation timestamp |
-| `updated_at` | Last update timestamp |
+| `first_name` | First name |
+| `last_name` | Last name |
+| `created_at` | Created timestamp |
+| `updated_at` | Updated timestamp |
 
 Security:
 
 - RLS enabled
-- users can only select and update their own profile row
+- users can select and update only their own row
 
 ### `public.incomes`
 
 Purpose:
 
-- stores one row per income entry
-- supports the current Income page and total income calculation
+- stores one row per income event
 
-Relationship:
-
-- one-to-many from user to income rows
-
-Main columns:
+Columns:
 
 | Column | Meaning |
 | --- | --- |
-| `id` | Income row UUID |
-| `user_id` | Owner user id |
-| `source` | Free-text income source |
-| `amount` | Positive income amount |
+| `id` | Income UUID |
+| `user_id` | Owner user |
+| `source` | Free-text source |
+| `amount` | Positive amount |
 | `received_on` | Income date |
-| `note` | Optional note stored as text |
-| `created_at` | Creation timestamp |
-| `updated_at` | Last update timestamp |
-
-Constraints:
-
-- `source` cannot be blank
-- `amount` must be greater than `0`
+| `note` | Optional note |
+| `created_at` | Created timestamp |
+| `updated_at` | Updated timestamp |
 
 Security:
 
 - RLS enabled
-- users can select, insert, update, and delete only their own income rows
+- users can select, insert, update, and delete only their own rows
 
 ### `public.budgets`
 
 Purpose:
 
-- stores one row per budget category and period
-- supports the current Budgets page and total budget calculation
+- stores one budget allocation per category and date range
 
-Relationship:
-
-- one-to-many from user to budget rows
-
-Main columns:
+Columns:
 
 | Column | Meaning |
 | --- | --- |
-| `id` | Budget row UUID |
-| `user_id` | Owner user id |
-| `category` | Free-text budget category |
-| `category_key` | Generated normalized category for overlap rules |
-| `icon` | Stored display icon |
-| `allocated_amount` | Positive allocated amount |
-| `period_start` | Budget start date |
-| `period_end` | Budget end date |
-| `created_at` | Creation timestamp |
-| `updated_at` | Last update timestamp |
+| `id` | Budget UUID |
+| `user_id` | Owner user |
+| `category` | Free-text category |
+| `category_key` | Generated normalized category |
+| `icon` | Chosen display icon |
+| `allocated_amount` | Planned budget amount |
+| `period_start` | Range start |
+| `period_end` | Range end |
+| `created_at` | Created timestamp |
+| `updated_at` | Updated timestamp |
+
+Important constraints:
+
+- `allocated_amount > 0`
+- `period_end >= period_start`
+- same user cannot create overlapping budgets for the same normalized category
+
+### `public.expenses`
+
+Purpose:
+
+- stores one row per actual spend event
+
+Columns:
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Expense UUID |
+| `user_id` | Owner user |
+| `category` | Free-text category |
+| `category_key` | Generated normalized category |
+| `amount` | Positive expense amount |
+| `spent_on` | Expense date |
+| `note` | Optional note |
+| `created_at` | Created timestamp |
+| `updated_at` | Updated timestamp |
 
 Security:
 
 - RLS enabled
-- users can select, insert, update, and delete only their own budget rows
+- users can select, insert, update, and delete only their own rows
 
-## 5.2 Shared functions and triggers
+## 7.2 Shared database functions and triggers
 
 ### `public.set_updated_at()`
 
 Purpose:
 
-- automatically updates `updated_at` before row updates
+- updates `updated_at` before row updates
 
-Current usage:
+Attached to:
 
-- attached to `public.profiles`
-- attached to `public.incomes`
-- attached to `public.budgets`
+- `public.profiles`
+- `public.incomes`
+- `public.budgets`
+- `public.expenses`
 
 ### `public.handle_new_user()`
 
 Purpose:
 
-- creates the matching `public.profiles` row after a new Supabase auth user is created
+- automatically inserts a matching profile after a new auth user is created
 
-Current trigger flow:
-
-- insert into `auth.users`
-- trigger fires
-- insert into `public.profiles`
-
-## 5.3 Current indexing and uniqueness
+## 7.3 Indexing
 
 | Object | Type | Reason |
 | --- | --- | --- |
 | `profiles.id` | Primary key | One profile per auth user |
-| `profiles.email` | Unique | No duplicate profile email values |
-| `incomes.id` | Primary key | Unique income row identity |
-| `idx_incomes_user_received_on_desc` | Composite index | Fast user income listing by newest date |
-| `budgets.id` | Primary key | Unique budget row identity |
-| `idx_budgets_user_period_start_desc` | Composite index | Fast user budget listing by newest period |
+| `profiles.email` | Unique | Prevent duplicate profile email values |
+| `incomes.id` | Primary key | Unique income identity |
+| `idx_incomes_user_received_on_desc` | Composite index | Fast newest-first income listing |
+| `budgets.id` | Primary key | Unique budget identity |
+| `idx_budgets_user_period_start_desc` | Composite index | Fast budget listing by newest period |
+| `expenses.id` | Primary key | Unique expense identity |
+| `idx_expenses_user_spent_on_desc` | Composite index | Fast newest-first expense listing |
+| `idx_expenses_user_category_key_spent_on` | Composite index | Fast category/date-based expense matching |
 
-### Why `incomes` has no business unique index
+## 8. Finance Domain Model
 
-This is intentional.
+SpendWise currently follows a **budget-first** finance model.
 
-SpendWise currently does **not** enforce uniqueness on combinations like:
+### Core meanings
 
-- `user_id + source + amount + received_on`
+- **Income** = money received
+- **Budget** = planned category allocation for a date range
+- **Expense** = actual spending event
 
-Reason:
+### Derived logic
 
-- duplicate income entries can be valid
-- a user may receive two payments with the same amount on the same date
-- split salary deposits and repeated freelance payments are legitimate
+The app does not decrement stored income or stored budget rows directly when expenses are created.
 
-So for income:
+Instead:
 
-- `id` is the only required unique key
-- business duplication is allowed
+- `total income` = sum of income rows
+- `total expenses` = sum of expense rows
+- `remaining balance` = income minus expenses minus savings contributions/demo savings
+- `budget spent` = sum of matching expenses
+- `budget remaining` = `allocated_amount - matched expense total`
 
-## 6. Current Data Flow
+### Expense-to-budget matching
 
-## 6.1 Signup flow
+An expense matches a budget when:
 
-```txt
-Register form
--> registerAction
--> Supabase auth.signUp
--> auth.users row created
--> handle_new_user trigger
--> profiles row created
--> confirmation email sent
-```
+- the normalized category is the same
+- the expense date falls inside the budget period
+- the rows belong to the same user
 
-## 6.2 Login flow
+### Allowed states
 
-```txt
-Login form
--> loginAction
--> Supabase auth.signInWithPassword
--> session cookie stored
--> redirect /dashboard?login=success
-```
+The current implementation intentionally allows:
 
-## 6.3 Dashboard load flow
+- expenses with no matching budget
+- expenses that exceed a budget's remaining amount
 
-```txt
-Request /dashboard
--> verify auth claims
--> load profile from profiles
--> load incomes from incomes
--> derive recent income transactions
--> pass data into SpendWiseDashboard
--> render active dashboard subview
-```
+Those are shown as:
 
-## 6.4 Add income flow
+- **unbudgeted**
+- **over budget**
 
-**Implemented now**
+### Budget validation against income
 
-1. User opens the Add Income modal
-2. User fills source, amount, date, and note
-3. Client validates required fields
-4. `createIncomeAction` runs on the server
-5. Server inserts the income row into `public.incomes`
-6. `/dashboard` is revalidated
-7. Client state appends the created income row
-8. Income table and totals update in the dashboard
+When creating or updating a budget:
 
-## 6.5 Delete income flow
+- the app loads overlapping budgets
+- the app loads income rows in the selected period
+- the new allocation is blocked if overlapping allocations exceed same-period income
 
-**Implemented now**
+### Income deletion protection
 
-1. User confirms delete on the Income page
-2. `deleteIncomeAction` runs on the server
-3. Matching income row is deleted from `public.incomes`
-4. `/dashboard` is revalidated
-5. Client state removes the income row
+When deleting income:
 
-## 6.6 Error handling flow
+- the app checks affected budget periods
+- deletion is blocked if removing the income would leave budgets exceeding recorded income for those periods
 
-**Implemented now**
+## 9. Current Runtime Data Sources
 
-- income fetch errors are caught on dashboard load
-- dashboard falls back to an empty income list instead of crashing
-- Supabase mutation errors are sanitized before they are shown to the UI
-
-## 7. Planned Finance Module Interconnection
-
-This section describes the intended system behavior from `flowchart.md`. It is the target architecture, not the completed implementation.
-
-## 7.1 Planned next modules
-
-### Budgets
-
-**Implemented now**
-
-Current purpose:
-
-- define spending limits by category and period
-- feed budget progress and budget remaining logic
-
-Current connection:
-
-- income establishes how much money is available overall
-- budgets define how that money is allocated across categories
-- current budget spent values are still derived from local expenses until expenses are persisted
-
-### Expenses
-
-**Planned next**
-
-Future purpose:
-
-- store actual spend events
-- connect expense categories to budget usage
-
-Intended connection:
-
-- expenses should reduce remaining balance
-- expenses should increase spent values inside the matching budget
-- expenses should update charts and recent transactions
-
-### Savings goals
-
-**Planned next**
-
-Future purpose:
-
-- store user savings targets such as emergency fund or vacation fund
-
-Intended connection:
-
-- goals provide target amounts and progress displays
-- savings progress becomes part of dashboard summaries
-
-### Savings contributions
-
-**Planned next**
-
-Future purpose:
-
-- store each deposit toward a savings goal
-
-Intended connection:
-
-- contributions should update savings goal progress
-- contributions should reduce remaining available balance
-- contributions should appear in recent transactions
-
-### Recent transactions
-
-**Planned next**
-
-Target behavior:
-
-- become a unified query or view across all finance modules
-
-Expected combined sources:
-
-- incomes
-- expenses
-- savings contributions
-
-Important:
-
-- the current app does **not** have a final unified transactions table
-- current recent transactions are transitional
-
-### Analytics and reports
-
-**Planned next**
-
-Future purpose:
-
-- aggregate persisted finance data across time periods
-- show month summaries, category breakdowns, trends, and budget efficiency
-
-Expected dependencies:
-
-- incomes
-- budgets
-- expenses
-- savings goals
-- savings contributions
-
-## 7.2 Intended project logic from the flowchart
-
-The target finance workflow is:
-
-1. user logs in
-2. dashboard loads all finance records
-3. analytics are calculated
-4. user navigates through finance pages
-5. quick actions create or change finance data
-6. dashboard cards, charts, and recent transactions refresh from shared data
-
-In the finished architecture:
-
-- Add Income should refresh income totals and recent transactions
-- Create Budget should enforce allocation rules and feed budget progress
-- Add Expense should match a budget category and update both expense totals and budget consumption
-- Add Savings should update goal progress and savings totals
-- Analytics and Reports should summarize all persisted modules together
-
-## 8. Current Gaps and Next Build Steps
-
-### Current gaps
-
-- expenses are not persisted yet
-- savings goals are not persisted yet
-- savings contributions are not persisted yet
-- recent transactions are not yet fully unified
-- analytics and reports still depend on local dashboard state for non-income data
-
-### Recommended next implementation order
-
-1. Create database-backed expense tables and budget linkage
-2. Create savings goal and savings contribution tables
-3. Replace local recent transactions with a unified server query
-4. Move analytics and reporting calculations fully to persisted finance data
-
-### Route-level architectural note
-
-The dashboard subpages can remain client-side views for now, but later they may need to become separate routes if the app grows in:
-
-- complexity
-- query volume
-- deep-linking requirements
-- page-specific server loading needs
-
-## 9. Source Files Worth Knowing
-
-These files are the main anchors for understanding the current system:
-
-| File | Why it matters |
+| Module | Source of truth |
 | --- | --- |
-| `app/(auth)/actions.ts` | Register and login server actions |
-| `app/dashboard/page.tsx` | Protected dashboard loader and server-side income/profile fetch |
-| `app/dashboard/actions.ts` | Income create/delete server actions |
-| `components/spendwise-dashboard.tsx` | Main dashboard shell, subviews, local finance state, charts, and modals |
-| `supabase.md` | Backend setup and architecture notes |
-| `supabase_sql.md` | SQL schema, triggers, indexes, and RLS policies |
-| `flowchart.md` | Intended end-to-end finance workflow |
+| Auth session | Supabase Auth |
+| Profiles | `public.profiles` |
+| Incomes | `public.incomes` |
+| Budgets | `public.budgets` |
+| Expenses | `public.expenses` |
+| Savings goals | Local dashboard state |
+| Savings contributions | Local dashboard state |
+| Recent transactions | Derived from incomes + expenses + local savings events |
+| Analytics | Derived in dashboard client component |
+| Reports | Derived in dashboard client component |
 
-## 10. Final Architecture Summary
+## 10. Dashboard Data Flow
 
-SpendWise already has:
+### Initial dashboard load
 
-- a working public site
-- working authentication
-- email confirmation
-- protected dashboard access
-- profile storage
-- income storage
+1. Request hits `/dashboard`
+2. Session is verified through Supabase claims
+3. Profile is loaded from `public.profiles`
+4. Incomes are loaded through `listUserIncomes()`
+5. Budgets are loaded through `listUserBudgets()`
+6. Expenses are loaded through `listUserExpenses()`
+7. Recent transactions are derived server-side from incomes and expenses
+8. Data is passed into `SpendWiseDashboard`
+9. Client derives totals, chart datasets, and page-level views
 
-SpendWise is still evolving toward a fully interconnected finance system where:
+### Server-side loaders
 
-- all finance modules are database-backed
-- all dashboard metrics come from shared persisted data
-- all pages participate in one consistent financial model
+Files:
 
-Right now, the project should be understood as:
+- [lib/incomes.ts](/E:/my-codes/spendwise/lib/incomes.ts:1)
+- [lib/budgets.ts](/E:/my-codes/spendwise/lib/budgets.ts:1)
+- [lib/expenses.ts](/E:/my-codes/spendwise/lib/expenses.ts:1)
 
-- **implemented auth + implemented income**
-- **planned full finance platform**
+All loaders:
 
-That distinction is important for future development, testing, and database design.
+- are `server-only`
+- read auth claims from Supabase
+- return only the signed-in user’s rows
+- order newest-first for UI use
+
+## 11. Mutation Architecture
+
+Finance mutations live in:
+
+- [app/dashboard/actions.ts](/E:/my-codes/spendwise/app/dashboard/actions.ts:1)
+
+### Income actions
+
+- `createIncomeAction`
+- `deleteIncomeAction`
+
+### Budget actions
+
+- `createBudgetAction`
+- `updateBudgetAction`
+- `deleteBudgetAction`
+
+### Expense actions
+
+- `createExpenseAction`
+- `deleteExpenseAction`
+
+### Mutation behavior
+
+All current finance server actions:
+
+- verify the authenticated user
+- validate incoming data
+- scope every mutation by `user_id`
+- sanitize Supabase errors before surfacing them
+- call `revalidatePath("/dashboard")`
+
+## 12. Client Dashboard Architecture
+
+Primary file:
+
+- [components/spendwise-dashboard.tsx](/E:/my-codes/spendwise/components/spendwise-dashboard.tsx:1)
+
+This component is responsible for:
+
+- sidebar navigation
+- quick action modals
+- optimistic/local state integration after successful server actions
+- derived finance metrics
+- charts and summary cards
+- local savings UI
+
+### Derived client calculations
+
+The dashboard derives:
+
+- budget spent and remaining values
+- expense-by-category breakdowns
+- monthly income vs expense chart data
+- recent transactions
+- budget efficiency and report summaries
+
+### Why this matters
+
+The dashboard is currently the application composition layer, not just a visual layer. It coordinates both persisted data and remaining local-only features.
+
+## 13. Current File Responsibilities
+
+| File | Responsibility |
+| --- | --- |
+| [app/dashboard/page.tsx](/E:/my-codes/spendwise/app/dashboard/page.tsx:1) | Protected dashboard loader |
+| [app/dashboard/actions.ts](/E:/my-codes/spendwise/app/dashboard/actions.ts:1) | Finance server actions |
+| [components/spendwise-dashboard.tsx](/E:/my-codes/spendwise/components/spendwise-dashboard.tsx:1) | Main finance workspace UI |
+| [app/(auth)/actions.ts](/E:/my-codes/spendwise/app/(auth)/actions.ts:1) | Register and login actions |
+| [app/(auth)/layout.tsx](/E:/my-codes/spendwise/app/(auth)/layout.tsx:1) | Redirect authenticated users away from auth pages |
+| [app/auth/confirm/page.tsx](/E:/my-codes/spendwise/app/auth/confirm/page.tsx:1) | Confirm email status page |
+| [app/auth/confirm/verify/route.ts](/E:/my-codes/spendwise/app/auth/confirm/verify/route.ts:1) | OTP verification route |
+| [lib/supabase/server.ts](/E:/my-codes/spendwise/lib/supabase/server.ts:1) | Server Supabase client |
+| [lib/supabase/client.ts](/E:/my-codes/spendwise/lib/supabase/client.ts:1) | Browser Supabase client |
+| [lib/supabase/proxy.ts](/E:/my-codes/spendwise/lib/supabase/proxy.ts:1) | Session refresh proxy helper |
+
+## 14. Current Gaps
+
+The app is functional, but not yet a fully persisted finance platform.
+
+Remaining gaps:
+
+- savings goals are local-only
+- savings contributions are local-only
+- recent transactions are still partially derived from local savings state
+- analytics and reports are not yet fully server-driven
+- dashboard subpages are not yet independent routes
+
+## 15. Recommended Next Steps
+
+1. Add persisted `savings_goals`
+2. Add persisted `savings_contributions`
+3. Replace local savings state with database-backed server actions
+4. Move recent transactions to a unified server query
+5. Move analytics/report computations to persisted data sources
+6. Consider splitting dashboard subviews into route-level pages if complexity grows
+
+## 16. Architecture Summary
+
+SpendWise is currently best understood as:
+
+- a production-style auth and protected-app shell
+- a database-backed personal finance dashboard for incomes, budgets, and expenses
+- a partially transitional product where savings and some reporting remain local/demo state
+
+The important system invariant is:
+
+- **income records inflow**
+- **budgets record planned allocation**
+- **expenses record actual spending**
+
+Everything else in the current finance model is derived from those sources.
