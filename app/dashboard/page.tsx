@@ -8,6 +8,8 @@ import { listUserExpenses } from "@/lib/expenses";
 import { toExpenseTransaction } from "@/lib/expense-shared";
 import { toIncomeTransaction } from "@/lib/income-shared";
 import { listUserIncomes } from "@/lib/incomes";
+import { listUserReports } from "@/lib/reports";
+import { emptyReportData } from "@/lib/reports-shared";
 import { listUserSavings } from "@/lib/savings";
 import { toSavingsTransaction } from "@/lib/savings-shared";
 import { createClient } from "@/lib/supabase/server";
@@ -41,6 +43,7 @@ export default async function DashboardPage() {
     entries: [],
   };
   let analytics: Awaited<ReturnType<typeof listUserAnalytics>> = emptyAnalyticsData;
+  let reports: Awaited<ReturnType<typeof listUserReports>> = emptyReportData;
 
   try {
     incomes = await listUserIncomes();
@@ -72,6 +75,12 @@ export default async function DashboardPage() {
     console.error("Could not load analytics for dashboard.", error);
   }
 
+  try {
+    reports = await listUserReports();
+  } catch (error) {
+    console.error("Could not load reports for dashboard.", error);
+  }
+
   const recentTransactions = [
     ...incomes.map(toIncomeTransaction),
     ...expenses.map(toExpenseTransaction),
@@ -91,6 +100,7 @@ export default async function DashboardPage() {
       initialSavingsEntries={savings.entries}
       initialTransactions={recentTransactions}
       initialAnalyticsData={analytics}
+      initialReportData={reports}
       todayIso={todayIso}
     />
   );

@@ -7,7 +7,8 @@ SpendWise is a Next.js 16 personal finance application with:
 - a protected dashboard
 - persisted income, budget, and expense tracking
 - persisted savings goals and entries
-- reporting features that are still being completed
+- backend-computed analytics and monthly reports
+- client PDF export for reports
 
 ## Current Status
 
@@ -24,13 +25,15 @@ SpendWise is a Next.js 16 personal finance application with:
 - expense create/delete flow used by the dashboard
 - savings goal create/delete flow used by the dashboard
 - savings contribution/withdrawal flow used by the dashboard
+- backend-computed analytics used by the dashboard
+- backend-computed monthly reports used by the dashboard
+- PDF export for the selected monthly report
 - budget-to-income validation
 - expense-to-budget derived matching
 
 ### Not fully completed yet
 
 - fully unified transactions data source
-- fully server-driven reporting
 - separate route-level dashboard pages
 
 ## Tech Stack
@@ -43,6 +46,7 @@ SpendWise is a Next.js 16 personal finance application with:
 | Auth | Supabase Auth |
 | Database | Supabase Postgres |
 | Charts | Recharts |
+| PDF export | jsPDF + jspdf-autotable |
 | Notifications | Sonner |
 
 ## Project Structure
@@ -86,6 +90,8 @@ Important behavior:
 - budget usage is derived from matching expense category + date range
 - expenses without a matching budget are allowed and treated as unbudgeted
 - expenses can exceed a budget and show an overspent state
+- savings totals are derived from savings entries
+- analytics and reports are live-computed from persisted finance rows
 
 ## Local Development
 
@@ -132,6 +138,7 @@ Recommended order:
 2. incomes
 3. budgets
 4. expenses
+5. savings goals and entries
 
 ## 4. Start the app
 
@@ -188,6 +195,8 @@ These are currently client-side sections inside one dashboard page, not separate
 | Expenses | Persisted |
 | Savings goals | Persisted |
 | Savings entries | Persisted |
+| Analytics | Backend-computed from persisted rows |
+| Reports | Backend-computed from persisted rows |
 
 ## Validation Rules
 
@@ -239,6 +248,5 @@ For Vercel deployment:
 ## Next Recommended Work
 
 1. Unify transactions on the server
-2. Move reports fully to persisted data
-3. Add edit/delete support for individual savings entries
-4. Split dashboard subviews into route-level pages if needed
+2. Add edit/delete support for individual savings entries
+3. Split dashboard subviews into route-level pages if needed
