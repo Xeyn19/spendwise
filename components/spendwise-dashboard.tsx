@@ -51,6 +51,8 @@ import {
   updateBudgetAction,
 } from "@/app/dashboard/actions";
 import { ThemeToggle } from "@/components/theme-toggle";
+import type { AnalyticsData, TrendGranularity } from "@/lib/analytics-shared";
+import { buildAnalyticsData, buildTrendData } from "@/lib/analytics-shared";
 import type { BudgetRecord } from "@/lib/budget-shared";
 import type { ExpenseRecord, ExpenseTransaction } from "@/lib/expense-shared";
 import { normalizeCategoryKey, toExpenseTransaction } from "@/lib/expense-shared";
@@ -101,6 +103,8 @@ type Transaction = {
 
 type ModalType = "income" | "budget" | "expense" | "savings" | "contribution" | "report" | null;
 
+type TrendFilterMode = TrendGranularity | "custom";
+
 type UserProfile = {
   name: string;
   email: string;
@@ -130,16 +134,6 @@ const initialBudgets: Array<{
   { id: 4, category: "Utilities", icon: "💡", allocated: 2500, spent: 1200 },
 ];
 
-const baseMonthlyChartData = [
-  { month: "Jan", income: 46000, expenses: 26800 },
-  { month: "Feb", income: 48000, expenses: 28400 },
-  { month: "Mar", income: 51000, expenses: 30100 },
-  { month: "Apr", income: 49500, expenses: 29200 },
-  { month: "May", income: 53000, expenses: 5500 },
-  { month: "Jun", income: 0, expenses: 0 },
-];
-
-const pieColors = ["#16a34a", "#2563eb", "#ef4444", "#a855f7", "#f59e0b", "#06b6d4"];
 const iconOptions = ["🍽️", "🚗", "🛍️", "💡", "🏠"];
 
 function peso(amount: number) {
@@ -352,6 +346,7 @@ export function SpendWiseDashboard({
   initialSavingsGoals,
   initialSavingsEntries,
   initialTransactions,
+  initialAnalyticsData,
   todayIso,
 }: {
   user: UserProfile;
@@ -361,6 +356,7 @@ export function SpendWiseDashboard({
   initialSavingsGoals: SavingsGoal[];
   initialSavingsEntries: SavingsEntry[];
   initialTransactions: Array<IncomeTransaction | ExpenseTransaction | SavingsTransaction>;
+  initialAnalyticsData: AnalyticsData;
   todayIso: string;
 }) {
   const initials = React.useMemo(
@@ -383,7 +379,10 @@ export function SpendWiseDashboard({
   const [contributionGoal, setContributionGoal] = React.useState<SavingsGoal | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<string | null>(null);
   const [expenseFilter, setExpenseFilter] = React.useState("All");
-  const [selectedMonth, setSelectedMonth] = React.useState("May");
+  const [selectedMonth, setSelectedMonth] = React.useState("");
+  const [trendFilterMode, setTrendFilterMode] = React.useState<TrendFilterMode>("monthly");
+  const [trendCustomStart, setTrendCustomStart] = React.useState("");
+  const [trendCustomEnd, setTrendCustomEnd] = React.useState("");
   const [profileName, setProfileName] = React.useState(user.name);
   const [profileEmail, setProfileEmail] = React.useState(user.email);
   const [compactCurrency, setCompactCurrency] = React.useState(false);
@@ -492,48 +491,48 @@ export function SpendWiseDashboard({
     return { income, totalBudget, totalExpenses, totalSavings, remainingBalance, budgetRemaining };
   }, [budgets, derivedExpenses, incomes, savingsGoals]);
 
-  const expenseByCategory = React.useMemo(() => {
-    const grouped = derivedExpenses.reduce<Record<string, number>>((acc, expense) => {
-      acc[expense.category] = (acc[expense.category] ?? 0) + expense.amount;
-      return acc;
-    }, {});
-    return Object.entries(grouped).map(([name, value], index) => ({
-      name,
-      value,
-      color: pieColors[index % pieColors.length],
-    }));
-  }, [derivedExpenses]);
+  const analyticsData = React.useMemo(() => {
+    const nextAnalyticsData = buildAnalyticsData({
+      incomes,
+      expenses: derivedExpenses,
+      budgets: budgetRecords,
+      savingsEntries,
+    });
 
-  const monthlyChartData = React.useMemo(
-    () => {
-      const incomeByMonth = incomes.reduce<Record<string, number>>((acc, income) => {
-        const monthKey = new Date(`${income.date}T00:00:00`).toLocaleDateString("en-US", {
-          month: "short",
-          timeZone: "UTC",
-        });
+    if (nextAnalyticsData.hasFinancialData || !initialAnalyticsData.hasFinancialData) {
+      return nextAnalyticsData;
+    }
 
-        acc[monthKey] = (acc[monthKey] ?? 0) + income.amount;
-        return acc;
-      }, {});
+    return initialAnalyticsData;
+  }, [budgetRecords, derivedExpenses, incomes, initialAnalyticsData, savingsEntries]);
 
-      const expenseByMonth = derivedExpenses.reduce<Record<string, number>>((acc, expense) => {
-        const monthKey = new Date(`${expense.date}T00:00:00`).toLocaleDateString("en-US", {
-          month: "short",
-          timeZone: "UTC",
-        });
+  const trendData = React.useMemo(() => {
+    if (trendFilterMode === "monthly") {
+      return analyticsData.monthlyTrend;
+    }
 
-        acc[monthKey] = (acc[monthKey] ?? 0) + expense.amount;
-        return acc;
-      }, {});
+    return buildTrendData({
+      incomes,
+      expenses: derivedExpenses,
+      savingsEntries,
+      granularity: trendFilterMode === "custom" ? "daily" : trendFilterMode,
+      startDate: trendFilterMode === "custom" ? trendCustomStart : undefined,
+      endDate: trendFilterMode === "custom" ? trendCustomEnd : undefined,
+    });
+  }, [
+    analyticsData.monthlyTrend,
+    derivedExpenses,
+    incomes,
+    savingsEntries,
+    trendCustomEnd,
+    trendCustomStart,
+    trendFilterMode,
+  ]);
 
-      return baseMonthlyChartData.map((item) => ({
-        ...item,
-        income: incomeByMonth[item.month] ?? 0,
-        expenses: expenseByMonth[item.month] ?? 0,
-      }));
-    },
-    [derivedExpenses, incomes]
-  );
+  const trendSubtitle =
+    trendFilterMode === "custom"
+      ? "Custom date range grouped daily"
+      : `${trendFilterMode.charAt(0).toUpperCase()}${trendFilterMode.slice(1)} performance`;
 
   const recentTransactions = React.useMemo(
     () => [...transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10),
@@ -555,30 +554,21 @@ export function SpendWiseDashboard({
     [derivedExpenses, expenseFilter]
   );
 
-  const topCategory = React.useMemo(() => {
-    if (expenseByCategory.length === 0) return { name: "None", value: 0 };
-    return [...expenseByCategory].sort((a, b) => b.value - a.value)[0];
-  }, [expenseByCategory]);
-
-  const analytics = React.useMemo(() => {
-    const avgMonthlyExpense = Math.round(
-      monthlyChartData.reduce((sum, item) => sum + item.expenses, 0) / monthlyChartData.length
-    );
-    const savingsRate = totals.income > 0 ? Math.round((totals.totalSavings / totals.income) * 100) : 0;
-    const budgetEfficiency =
-      totals.totalBudget > 0
-        ? Math.max(0, Math.round(((totals.totalBudget - totals.totalExpenses) / totals.totalBudget) * 100))
-        : 0;
-    return { avgMonthlyExpense, savingsRate, budgetEfficiency };
-  }, [monthlyChartData, totals.income, totals.totalBudget, totals.totalExpenses, totals.totalSavings]);
-
   const selectedReport = React.useMemo(() => {
-    const monthData = monthlyChartData.find((item) => item.month === selectedMonth) ?? monthlyChartData[0];
-    const netSavings = monthData.income - monthData.expenses;
+    const monthData =
+      analyticsData.monthlyTrend.find((item) => item.monthKey === selectedMonth) ??
+      analyticsData.monthlyTrend.at(-1) ?? {
+        monthKey: "",
+        month: "No data",
+        income: 0,
+        expenses: 0,
+        savings: 0,
+        netSavings: 0,
+      };
     const budgetUsed = totals.totalBudget > 0 ? Math.round((monthData.expenses / totals.totalBudget) * 100) : 0;
     const incomeSpent = monthData.income > 0 ? Math.round((monthData.expenses / monthData.income) * 100) : 0;
-    return { ...monthData, netSavings, budgetUsed, incomeSpent };
-  }, [monthlyChartData, selectedMonth, totals.totalBudget]);
+    return { ...monthData, budgetUsed, incomeSpent };
+  }, [analyticsData.monthlyTrend, selectedMonth, totals.totalBudget]);
 
   const setPage = React.useCallback((page: ActivePage) => {
     setActivePage(page);
@@ -1134,7 +1124,7 @@ export function SpendWiseDashboard({
             <SectionTitle title="Income vs Expenses" subtitle="Monthly performance" />
             <div className="mt-5 h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyChartData}>
+                <BarChart data={analyticsData.monthlyTrend}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                   <XAxis dataKey="month" axisLine={false} tickLine={false} />
                   <YAxis axisLine={false} tickLine={false} tickFormatter={(value) => `₱${Number(value) / 1000}k`} />
@@ -1151,8 +1141,8 @@ export function SpendWiseDashboard({
             <div className="mt-5 h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={expenseByCategory} dataKey="value" nameKey="name" innerRadius={58} outerRadius={95} paddingAngle={3}>
-                    {expenseByCategory.map((entry) => (
+                  <Pie data={analyticsData.expenseByCategory} dataKey="value" nameKey="name" innerRadius={58} outerRadius={95} paddingAngle={3}>
+                    {analyticsData.expenseByCategory.map((entry) => (
                       <Cell key={entry.name} fill={entry.color} />
                     ))}
                   </Pie>
@@ -1161,7 +1151,7 @@ export function SpendWiseDashboard({
               </ResponsiveContainer>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
-              {expenseByCategory.map((entry) => (
+              {analyticsData.expenseByCategory.map((entry) => (
                 <div key={entry.name} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm">
                   <span className="flex items-center gap-2 font-semibold text-slate-700">
                     <span className="size-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
@@ -1427,72 +1417,122 @@ export function SpendWiseDashboard({
     return (
       <div className="space-y-6">
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard label="Avg Monthly Expense" value={peso(analytics.avgMonthlyExpense)} />
-          <MetricCard label="Highest Spending Category" value={topCategory.name} />
-          <MetricCard label="Savings Rate" value={`${analytics.savingsRate}%`} />
-          <MetricCard label="Budget Efficiency" value={`${analytics.budgetEfficiency}%`} />
+          <MetricCard label="Avg Monthly Expense" value={peso(analyticsData.summary.avgMonthlyExpense)} />
+          <MetricCard label="Highest Spending Category" value={analyticsData.summary.highestSpendingCategory} />
+          <MetricCard label="Savings Rate" value={`${analyticsData.summary.savingsRate}%`} />
+          <MetricCard label="Budget Efficiency" value={`${analyticsData.summary.budgetEfficiency}%`} />
         </section>
         <Panel>
-          <SectionTitle title="Income vs Expenses Trend" subtitle="All visible months" />
-          <div className="mt-5 h-96">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={monthlyChartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="month" axisLine={false} tickLine={false} />
-                <YAxis axisLine={false} tickLine={false} tickFormatter={(value) => `₱${Number(value) / 1000}k`} />
-                <Tooltip formatter={(value) => peso(Number(value))} />
-                <Line type="monotone" dataKey="income" stroke="#16a34a" strokeWidth={3} dot={{ r: 4 }} />
-                <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} />
-              </LineChart>
-            </ResponsiveContainer>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <SectionTitle title="Income vs Expenses Trend" subtitle={trendSubtitle} />
+            <div className="flex flex-col gap-3 sm:items-end">
+              <div className="flex flex-wrap gap-2">
+                {(["daily", "weekly", "monthly", "custom"] as TrendFilterMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setTrendFilterMode(mode)}
+                    className={cx(
+                      "rounded-lg border px-3 py-2 text-sm font-semibold transition",
+                      trendFilterMode === mode
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-background/70 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                    )}
+                  >
+                    {mode === "custom" ? "Custom" : mode.charAt(0).toUpperCase() + mode.slice(1)}
+                  </button>
+                ))}
+              </div>
+              {trendFilterMode === "custom" ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <TextInput
+                    type="date"
+                    value={trendCustomStart}
+                    onChange={(event) => setTrendCustomStart(event.target.value)}
+                    aria-label="Trend start date"
+                  />
+                  <TextInput
+                    type="date"
+                    value={trendCustomEnd}
+                    onChange={(event) => setTrendCustomEnd(event.target.value)}
+                    aria-label="Trend end date"
+                  />
+                </div>
+              ) : null}
+            </div>
           </div>
+          {trendData.length === 0 ? (
+            <div className="mt-5">
+              <EmptyState message="No trend data for this filter" />
+            </div>
+          ) : (
+            <div className="mt-5 h-96">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="month" axisLine={false} tickLine={false} />
+                  <YAxis axisLine={false} tickLine={false} tickFormatter={(value) => `₱${Number(value) / 1000}k`} />
+                  <Tooltip formatter={(value) => peso(Number(value))} />
+                  <Line type="monotone" dataKey="income" stroke="#16a34a" strokeWidth={3} dot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="savings" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </Panel>
         <Panel>
-          <ResponsiveTable>
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
-                <th className="py-3 pr-4">Category</th>
-                <th className="py-3 pr-4">Budgeted</th>
-                <th className="py-3 pr-4">Spent</th>
-                <th className="py-3 pr-4">Variance</th>
-                <th className="py-3">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {budgets.map((budget) => {
-                const variance = budget.allocated - budget.spent;
-                return (
-                  <tr key={budget.id} className="border-b border-slate-100 text-sm last:border-0">
-                    <td className="py-4 pr-4 font-semibold text-slate-900">{budget.category}</td>
-                    <td className="py-4 pr-4 text-slate-600">{peso(budget.allocated)}</td>
-                    <td className="py-4 pr-4 text-slate-600">{peso(budget.spent)}</td>
-                    <td className={cx("py-4 pr-4 font-bold", variance >= 0 ? "text-emerald-700" : "text-red-600")}>
-                      {peso(variance)}
-                    </td>
-                    <td className="py-4">
-                      <Badge tone={variance >= 0 ? "green" : "red"}>{variance >= 0 ? "On track" : "Over budget"}</Badge>
-                    </td>
+          <SectionTitle title="Budget Variance" subtitle="Budgeted versus spent by category" />
+          <div className="mt-5">
+            {analyticsData.budgetVariance.length === 0 ? (
+              <EmptyState message="No budget analytics yet" />
+            ) : (
+              <ResponsiveTable>
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th className="py-3 pr-4">Category</th>
+                    <th className="py-3 pr-4">Budgeted</th>
+                    <th className="py-3 pr-4">Spent</th>
+                    <th className="py-3 pr-4">Variance</th>
+                    <th className="py-3">Status</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </ResponsiveTable>
+                </thead>
+                <tbody>
+                  {analyticsData.budgetVariance.map((budget) => {
+                    return (
+                      <tr key={budget.id} className="border-b border-slate-100 text-sm last:border-0">
+                        <td className="py-4 pr-4 font-semibold text-slate-900">{budget.category}</td>
+                        <td className="py-4 pr-4 text-slate-600">{peso(budget.budgeted)}</td>
+                        <td className="py-4 pr-4 text-slate-600">{peso(budget.spent)}</td>
+                        <td className={cx("py-4 pr-4 font-bold", budget.variance >= 0 ? "text-emerald-700" : "text-red-600")}>
+                          {peso(budget.variance)}
+                        </td>
+                        <td className="py-4">
+                          <Badge tone={budget.variance >= 0 ? "green" : "red"}>{budget.status}</Badge>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </ResponsiveTable>
+            )}
+          </div>
         </Panel>
       </div>
     );
   }
 
   function renderReports() {
-    const topThree = [...expenseByCategory].sort((a, b) => b.value - a.value).slice(0, 3);
-    const underBudget = budgets.filter((budget) => budget.spent <= budget.allocated).length;
+    const topThree = analyticsData.expenseByCategory.slice(0, 3);
+    const underBudget = analyticsData.budgetVariance.filter((budget) => budget.variance >= 0).length;
 
     return (
       <div className="space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <SelectInput value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} className="max-w-xs">
-            {monthlyChartData.map((item) => (
-              <option key={item.month} value={item.month}>
-                {item.month} 2026
+          <SelectInput value={selectedReport.monthKey} onChange={(event) => setSelectedMonth(event.target.value)} className="max-w-xs">
+            {analyticsData.monthlyTrend.map((item) => (
+              <option key={item.monthKey} value={item.monthKey}>
+                {item.month}
               </option>
             ))}
           </SelectInput>
@@ -1502,7 +1542,7 @@ export function SpendWiseDashboard({
           </AppButton>
         </div>
         <Panel>
-          <SectionTitle title={`${selectedMonth} 2026 Report`} subtitle="Auto-generated monthly summary" />
+          <SectionTitle title={`${selectedReport.month} Report`} subtitle="Auto-generated monthly summary" />
           <div className="mt-5 grid gap-4 md:grid-cols-3">
             <MetricCard label="Total Income" value={peso(selectedReport.income)} />
             <MetricCard label="Total Expenses" value={peso(selectedReport.expenses)} />
@@ -1523,7 +1563,7 @@ export function SpendWiseDashboard({
             <div>
               <h3 className="font-bold text-slate-950">Budget compliance</h3>
               <p className="mt-3 rounded-xl bg-emerald-50 p-4 text-sm font-semibold leading-6 text-emerald-800">
-                You stayed under budget in {underBudget} of {budgets.length} categories.
+                You stayed under budget in {underBudget} of {analyticsData.budgetVariance.length} categories.
               </p>
               <p className="mt-3 text-sm text-slate-500">
                 {selectedReport.netSavings >= 0
@@ -1727,10 +1767,10 @@ export function SpendWiseDashboard({
                   <MetricCard label="Balance" value={peso(totals.remainingBalance)} />
                 </div>
                 <div className="rounded-xl bg-muted/55 p-4 text-sm text-muted-foreground dark:bg-white/4">
-                  <p><strong>Top spending:</strong> {topCategory.name} at {peso(topCategory.value)}</p>
+                  <p><strong>Top spending:</strong> {analyticsData.topCategory.name} at {peso(analyticsData.topCategory.value)}</p>
                   <p className="mt-2"><strong>Income spent:</strong> {totals.income > 0 ? Math.round((totals.totalExpenses / totals.income) * 100) : 0}%</p>
                   <p className="mt-2"><strong>Budget used:</strong> {totals.totalBudget > 0 ? Math.round((totals.totalExpenses / totals.totalBudget) * 100) : 0}%</p>
-                  <p className="mt-2"><strong>Savings rate:</strong> {analytics.savingsRate}%</p>
+                  <p className="mt-2"><strong>Savings rate:</strong> {analyticsData.summary.savingsRate}%</p>
                 </div>
                 <p className={cx("rounded-xl p-3 text-sm font-bold", totals.remainingBalance >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
                   {totals.remainingBalance >= 0 ? "✓ Healthy finances!" : "⚠ Watch your spending"}

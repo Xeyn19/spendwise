@@ -8,7 +8,7 @@ SpendWise is a Next.js 16 App Router application for personal finance tracking. 
 - Supabase-backed authentication
 - a protected dashboard workspace
 - database-backed finance modules for incomes, budgets, expenses, and savings
-- derived analytics and reporting layers that are still being completed
+- backend-computed analytics and derived reporting layers that are still being completed
 
 The current architecture is intentionally hybrid:
 
@@ -463,7 +463,7 @@ When deleting income:
 | Savings goals | `public.savings_goals` |
 | Savings entries | `public.savings_entries` |
 | Recent transactions | Derived from incomes + expenses + savings entries |
-| Analytics | Derived in dashboard client component |
+| Analytics | Live backend computation from persisted finance tables |
 | Reports | Derived in dashboard client component |
 
 ## 10. Dashboard Data Flow
@@ -556,9 +556,17 @@ The dashboard derives:
 
 - budget spent and remaining values
 - expense-by-category breakdowns
-- monthly income vs expense chart data
 - recent transactions
-- budget efficiency and report summaries
+- report summaries
+
+### Backend analytics calculations
+
+Analytics is computed through [lib/analytics.ts](/E:/my-codes/spendwise/lib/analytics.ts:1)
+and shared typed helpers in [lib/analytics-shared.ts](/E:/my-codes/spendwise/lib/analytics-shared.ts:1).
+The analytics layer derives monthly trends, category breakdowns, savings rate,
+budget efficiency, and budget variance from persisted finance rows. The Analytics
+trend chart can regroup the same persisted data by daily, weekly, monthly, or
+custom date-range filters.
 
 ### Why this matters
 
@@ -585,13 +593,13 @@ The app is functional, but not yet a fully persisted finance platform.
 
 Remaining gaps:
 
-- analytics and reports are not yet fully server-driven
+- reports are not yet fully server-driven
 - dashboard subpages are not yet independent routes
 
 ## 15. Recommended Next Steps
 
 1. Move recent transactions to a unified server query
-2. Move analytics/report computations to persisted data sources
+2. Move report computations to persisted data sources
 3. Consider adding edit/delete support for individual savings entries
 4. Consider splitting dashboard subviews into route-level pages if complexity grows
 
@@ -601,7 +609,7 @@ SpendWise is currently best understood as:
 
 - a production-style auth and protected-app shell
 - a database-backed personal finance dashboard for incomes, budgets, expenses, and savings
-- a partially transitional product where analytics and reporting remain derived in the client
+- a partially transitional product where reporting remains derived in the client
 
 The important system invariant is:
 
