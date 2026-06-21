@@ -58,6 +58,8 @@ import type { ExpenseRecord, ExpenseTransaction } from "@/lib/expense-shared";
 import { normalizeCategoryKey, toExpenseTransaction } from "@/lib/expense-shared";
 import type { IncomeRecord, IncomeTransaction } from "@/lib/income-shared";
 import { toIncomeTransaction } from "@/lib/income-shared";
+import type { MonthlyReport, ReportData } from "@/lib/reports-shared";
+import { buildReportData } from "@/lib/reports-shared";
 import type { SavingsEntryRecord, SavingsTransaction, SavingsGoalRecord } from "@/lib/savings-shared";
 import { toSavingsTransaction } from "@/lib/savings-shared";
 
@@ -347,6 +349,7 @@ export function SpendWiseDashboard({
   initialSavingsEntries,
   initialTransactions,
   initialAnalyticsData,
+  initialReportData,
   todayIso,
 }: {
   user: UserProfile;
@@ -357,6 +360,7 @@ export function SpendWiseDashboard({
   initialSavingsEntries: SavingsEntry[];
   initialTransactions: Array<IncomeTransaction | ExpenseTransaction | SavingsTransaction>;
   initialAnalyticsData: AnalyticsData;
+  initialReportData: ReportData;
   todayIso: string;
 }) {
   const initials = React.useMemo(
@@ -506,6 +510,21 @@ export function SpendWiseDashboard({
     return initialAnalyticsData;
   }, [budgetRecords, derivedExpenses, incomes, initialAnalyticsData, savingsEntries]);
 
+  const reportData = React.useMemo(() => {
+    const nextReportData = buildReportData({
+      incomes,
+      expenses: derivedExpenses,
+      budgets: budgetRecords,
+      savingsEntries,
+    });
+
+    if (nextReportData.hasReportableData || !initialReportData.hasReportableData) {
+      return nextReportData;
+    }
+
+    return initialReportData;
+  }, [budgetRecords, derivedExpenses, incomes, initialReportData, savingsEntries]);
+
   const trendData = React.useMemo(() => {
     if (trendFilterMode === "monthly") {
       return analyticsData.monthlyTrend;
@@ -554,21 +573,241 @@ export function SpendWiseDashboard({
     [derivedExpenses, expenseFilter]
   );
 
-  const selectedReport = React.useMemo(() => {
-    const monthData =
-      analyticsData.monthlyTrend.find((item) => item.monthKey === selectedMonth) ??
-      analyticsData.monthlyTrend.at(-1) ?? {
-        monthKey: "",
-        month: "No data",
-        income: 0,
-        expenses: 0,
-        savings: 0,
-        netSavings: 0,
-      };
-    const budgetUsed = totals.totalBudget > 0 ? Math.round((monthData.expenses / totals.totalBudget) * 100) : 0;
-    const incomeSpent = monthData.income > 0 ? Math.round((monthData.expenses / monthData.income) * 100) : 0;
-    return { ...monthData, budgetUsed, incomeSpent };
-  }, [analyticsData.monthlyTrend, selectedMonth, totals.totalBudget]);
+  const selectedReport = React.useMemo(
+    () =>
+      reportData.reports.find((report) => report.monthKey === selectedMonth) ??
+      reportData.reports.at(-1) ??
+      null,
+    [reportData.reports, selectedMonth]
+  );
+
+  const exportReportPdf = React.useCallback(async (report: MonthlyReport | null) => {
+    if (!report) {
+      toast.error("No report is available to export.");
+      return;
+    }
+
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+    const logoDataUrl = await fetch("/spendwise-logo.png")
+      .then(async (response) => {
+        if (!response.ok) return null;
+
+        const blob = await response.blob();
+
+        return await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+      })
+      .catch(() => null);
+    const doc = new jsPDF();
+    const pdf = doc as typeof doc & { lastAutoTable?: { finalY: number } };
+    const generatedAt = new Date().toLocaleDateString("en-PH", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    type PdfColor = [number, number, number];
+    const brand = {
+      ink: [13, 24, 34] as PdfColor,
+      primary: [23, 178, 106] as PdfColor,
+      primaryDark: [4, 17, 11] as PdfColor,
+      muted: [95, 115, 133] as PdfColor,
+      panel: [244, 248, 247] as PdfColor,
+      border: [219, 232, 229] as PdfColor,
+      blue: [37, 99, 235] as PdfColor,
+      danger: [239, 68, 68] as PdfColor,
+    };
+
+    pdf.setFillColor(...brand.primaryDark);
+    pdf.rect(0, 0, pageWidth, 45, "F");
+    if (logoDataUrl) {
+      pdf.addImage(logoDataUrl, "PNG", 14, 10, 12, 12);
+    } else {
+      pdf.setFillColor(...brand.primary);
+      pdf.roundedRect(14, 12, 9, 9, 2, 2, "F");
+    }
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(20);
+    pdf.text("SpendWise", 31, 19);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.text("Monthly finance report", 31, 26);
+    pdf.setTextColor(196, 238, 217);
+    pdf.text(report.monthLabel, 14, 36);
+    pdf.text(`Generated ${generatedAt}`, pageWidth - 14, 36, { align: "right" });
+
+    pdf.setTextColor(...brand.ink);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(14);
+    pdf.text("Financial Snapshot", 14, 58);
+    pdf.setDrawColor(...brand.border);
+    pdf.line(14, 62, pageWidth - 14, 62);
+
+    const drawMetricCard = (
+      label: string,
+      value: string,
+      x: number,
+      y: number,
+      color: PdfColor = brand.ink
+    ) => {
+      pdf.setFillColor(...brand.panel);
+      pdf.setDrawColor(...brand.border);
+      pdf.roundedRect(x, y, 57, 26, 3, 3, "FD");
+      pdf.setTextColor(...brand.muted);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(8);
+      pdf.text(label.toUpperCase(), x + 4, y + 8);
+      pdf.setTextColor(...color);
+      pdf.setFontSize(13);
+      pdf.text(value, x + 4, y + 19, { maxWidth: 49 });
+    };
+
+    drawMetricCard("Income", peso(report.totalIncome), 14, 69, brand.primary);
+    drawMetricCard("Expenses", peso(report.totalExpenses), 76.5, 69, brand.danger);
+    drawMetricCard(
+      "Net Savings",
+      peso(report.netSavings),
+      139,
+      69,
+      report.netSavings >= 0 ? brand.blue : brand.danger
+    );
+
+    pdf.setFillColor(232, 248, 239);
+    pdf.setDrawColor(185, 229, 204);
+    pdf.roundedRect(14, 103, pageWidth - 28, 22, 3, 3, "FD");
+    pdf.setTextColor(...brand.primaryDark);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(10);
+    pdf.text("Status", 20, 112);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9);
+    pdf.text(pdf.splitTextToSize(report.statusMessage, 164), 20, 119);
+
+    autoTable(pdf, {
+      startY: 136,
+      head: [["Metric", "Amount"]],
+      body: [
+        ["Savings Contributions", peso(report.savingsContributions)],
+        ["Savings Withdrawals", peso(report.savingsWithdrawals)],
+        ["Net Savings Entries", peso(report.netSavingsEntries)],
+        ["Income Spent", `${report.incomeSpentPercentage}%`],
+        ["Budget Used", `${report.budgetUsedPercentage}%`],
+        ["Budget Compliance", `${report.budgetComplianceCount}/${report.budgetCount} (${report.budgetCompliancePercentage}%)`],
+      ],
+      theme: "plain",
+      margin: { left: 14, right: 14 },
+      headStyles: {
+        fillColor: brand.primary,
+        textColor: brand.primaryDark,
+        fontStyle: "bold",
+      },
+      bodyStyles: {
+        textColor: brand.ink,
+        lineColor: brand.border,
+        lineWidth: 0.2,
+      },
+      alternateRowStyles: { fillColor: brand.panel },
+      styles: {
+        font: "helvetica",
+        fontSize: 9,
+        cellPadding: 3,
+      },
+      columnStyles: {
+        1: { halign: "right", fontStyle: "bold" },
+      },
+    });
+
+    autoTable(pdf, {
+      startY: (pdf.lastAutoTable?.finalY ?? 136) + 10,
+      head: [["Top Category", "Amount", "Share"]],
+      body:
+        report.topCategories.length > 0
+          ? report.topCategories.map((category) => [
+              category.name,
+              peso(category.amount),
+              `${category.percent}%`,
+            ])
+          : [["No spending categories", peso(0), "0%"]],
+      theme: "plain",
+      margin: { left: 14, right: 14 },
+      headStyles: {
+        fillColor: brand.blue,
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+      },
+      bodyStyles: {
+        textColor: brand.ink,
+        lineColor: brand.border,
+        lineWidth: 0.2,
+      },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      styles: {
+        font: "helvetica",
+        fontSize: 9,
+        cellPadding: 3,
+      },
+      columnStyles: {
+        1: { halign: "right", fontStyle: "bold" },
+        2: { halign: "right" },
+      },
+    });
+
+    autoTable(pdf, {
+      startY: (pdf.lastAutoTable?.finalY ?? 136) + 10,
+      head: [["Budget", "Budgeted", "Spent", "Variance", "Status"]],
+      body:
+        report.budgetRows.length > 0
+          ? report.budgetRows.map((budget) => [
+              budget.category,
+              peso(budget.budgeted),
+              peso(budget.spent),
+              peso(budget.variance),
+              budget.status,
+            ])
+          : [["No budgets", peso(0), peso(0), peso(0), "No data"]],
+      theme: "plain",
+      margin: { left: 14, right: 14 },
+      headStyles: {
+        fillColor: brand.primaryDark,
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+      },
+      bodyStyles: {
+        textColor: brand.ink,
+        lineColor: brand.border,
+        lineWidth: 0.2,
+      },
+      alternateRowStyles: { fillColor: brand.panel },
+      styles: {
+        font: "helvetica",
+        fontSize: 8.5,
+        cellPadding: 2.8,
+      },
+      columnStyles: {
+        1: { halign: "right" },
+        2: { halign: "right" },
+        3: { halign: "right", fontStyle: "bold" },
+      },
+    });
+
+    const footerY = pdf.internal.pageSize.getHeight() - 12;
+    pdf.setDrawColor(...brand.border);
+    pdf.line(14, footerY - 6, pageWidth - 14, footerY - 6);
+    pdf.setTextColor(...brand.muted);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    pdf.text("SpendWise keeps reports live from your persisted finance data.", 14, footerY);
+    pdf.text(`spendwise-report-${report.monthKey}.pdf`, pageWidth - 14, footerY, { align: "right" });
+    pdf.save(`spendwise-report-${report.monthKey}.pdf`);
+  }, []);
 
   const setPage = React.useCallback((page: ActivePage) => {
     setActivePage(page);
@@ -1523,53 +1762,106 @@ export function SpendWiseDashboard({
   }
 
   function renderReports() {
-    const topThree = analyticsData.expenseByCategory.slice(0, 3);
-    const underBudget = analyticsData.budgetVariance.filter((budget) => budget.variance >= 0).length;
+    if (!reportData.hasReportableData || !selectedReport) {
+      return <EmptyState message="No reportable finance data yet" />;
+    }
 
     return (
       <div className="space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <SelectInput value={selectedReport.monthKey} onChange={(event) => setSelectedMonth(event.target.value)} className="max-w-xs">
-            {analyticsData.monthlyTrend.map((item) => (
+          <SelectInput
+            value={selectedReport.monthKey}
+            onChange={(event) => setSelectedMonth(event.target.value)}
+            className="max-w-xs"
+          >
+            {reportData.monthOptions.map((item) => (
               <option key={item.monthKey} value={item.monthKey}>
-                {item.month}
+                {item.label}
               </option>
             ))}
           </SelectInput>
-          <AppButton onClick={() => window.print()}>
+          <AppButton onClick={() => exportReportPdf(selectedReport)}>
             <FileText className="size-4" />
             Export PDF
           </AppButton>
         </div>
         <Panel>
-          <SectionTitle title={`${selectedReport.month} Report`} subtitle="Auto-generated monthly summary" />
+          <SectionTitle title={`${selectedReport.monthLabel} Report`} subtitle="Backend-generated monthly summary" />
           <div className="mt-5 grid gap-4 md:grid-cols-3">
-            <MetricCard label="Total Income" value={peso(selectedReport.income)} />
-            <MetricCard label="Total Expenses" value={peso(selectedReport.expenses)} />
+            <MetricCard label="Total Income" value={peso(selectedReport.totalIncome)} />
+            <MetricCard label="Total Expenses" value={peso(selectedReport.totalExpenses)} />
             <MetricCard label="Net Savings" value={peso(selectedReport.netSavings)} />
           </div>
-          <div className="mt-6 grid gap-6 lg:grid-cols-2">
-            <div>
-              <h3 className="font-bold text-slate-950">Top 3 spending categories</h3>
-              <div className="mt-3 space-y-2">
-                {topThree.map((item) => (
-                  <div key={item.name} className="flex justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm">
-                    <span className="font-semibold text-slate-700">{item.name}</span>
-                    <span className="font-bold text-slate-950">{peso(item.value)}</span>
-                  </div>
-                ))}
-              </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <MetricCard label="Savings Contributions" value={peso(selectedReport.savingsContributions)} />
+            <MetricCard label="Savings Withdrawals" value={peso(selectedReport.savingsWithdrawals)} />
+            <MetricCard label="Net Savings Entries" value={peso(selectedReport.netSavingsEntries)} />
+          </div>
+          <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className="rounded-xl border border-border/70 bg-muted/35 p-4 dark:bg-white/4">
+              <h3 className="font-bold text-foreground dark:text-white">Top 3 spending categories</h3>
+              {selectedReport.topCategories.length === 0 ? (
+                <div className="mt-3 rounded-xl bg-muted/55 px-4 py-3 text-sm font-semibold text-muted-foreground dark:bg-white/4">
+                  No categorized spending this month.
+                </div>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {selectedReport.topCategories.map((item) => (
+                    <div key={item.name} className="flex justify-between rounded-xl bg-muted/55 px-4 py-3 text-sm dark:bg-white/4">
+                      <span className="font-semibold text-foreground">{item.name}</span>
+                      <span className="font-bold text-foreground">
+                        {peso(item.amount)} ({item.percent}%)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <div>
-              <h3 className="font-bold text-slate-950">Budget compliance</h3>
-              <p className="mt-3 rounded-xl bg-emerald-50 p-4 text-sm font-semibold leading-6 text-emerald-800">
-                You stayed under budget in {underBudget} of {analyticsData.budgetVariance.length} categories.
+            <div className="rounded-xl border border-border/70 bg-muted/35 p-4 dark:bg-white/4">
+              <h3 className="font-bold text-foreground dark:text-white">Budget compliance</h3>
+              <p className="mt-3 rounded-xl bg-emerald-50 p-4 text-sm font-semibold leading-6 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-100">
+                You stayed under budget in {selectedReport.budgetComplianceCount} of {selectedReport.budgetCount} categories ({selectedReport.budgetCompliancePercentage}%).
               </p>
-              <p className="mt-3 text-sm text-slate-500">
-                {selectedReport.netSavings >= 0
-                  ? "You kept a positive balance this month. Keep the spending rhythm steady."
-                  : "Your expenses exceeded income this month. Review high-spend categories first."}
-              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <MetricCard label="Income Spent" value={`${selectedReport.incomeSpentPercentage}%`} />
+                <MetricCard label="Budget Used" value={`${selectedReport.budgetUsedPercentage}%`} />
+              </div>
+              <p className="mt-3 text-sm text-muted-foreground">{selectedReport.statusMessage}</p>
+            </div>
+          </div>
+          <div className="mt-6 rounded-xl border border-border/70 bg-muted/35 p-4 dark:bg-white/4">
+            <SectionTitle title="Budget Compliance Table" subtitle="Budgeted versus spent for the selected month" />
+            <div className="mt-5">
+              {selectedReport.budgetRows.length === 0 ? (
+                <EmptyState message="No budgets for this report month" />
+              ) : (
+                <ResponsiveTable>
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                      <th className="py-3 pr-4">Category</th>
+                      <th className="py-3 pr-4">Budgeted</th>
+                      <th className="py-3 pr-4">Spent</th>
+                      <th className="py-3 pr-4">Variance</th>
+                      <th className="py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedReport.budgetRows.map((budget) => (
+                      <tr key={budget.id} className="border-b border-slate-100 text-sm last:border-0">
+                        <td className="py-4 pr-4 font-semibold text-slate-900">{budget.category}</td>
+                        <td className="py-4 pr-4 text-slate-600">{peso(budget.budgeted)}</td>
+                        <td className="py-4 pr-4 text-slate-600">{peso(budget.spent)}</td>
+                        <td className={cx("py-4 pr-4 font-bold", budget.variance >= 0 ? "text-emerald-700" : "text-red-600")}>
+                          {peso(budget.variance)}
+                        </td>
+                        <td className="py-4">
+                          <Badge tone={budget.variance >= 0 ? "green" : "red"}>{budget.status}</Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </ResponsiveTable>
+              )}
             </div>
           </div>
         </Panel>
@@ -1758,24 +2050,28 @@ export function SpendWiseDashboard({
             ) : null}
 
             {modal === "report" ? (
-              <div className="space-y-4">
-                <SectionTitle title="May 2026" subtitle="Current financial snapshot" />
-                <div className="grid grid-cols-2 gap-3">
-                  <MetricCard label="Income" value={peso(totals.income)} />
-                  <MetricCard label="Expenses" value={peso(totals.totalExpenses)} />
-                  <MetricCard label="Savings" value={peso(totals.totalSavings)} />
-                  <MetricCard label="Balance" value={peso(totals.remainingBalance)} />
+              selectedReport ? (
+                <div className="space-y-4">
+                  <SectionTitle title={selectedReport.monthLabel} subtitle="Current selected monthly report" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <MetricCard label="Income" value={peso(selectedReport.totalIncome)} />
+                    <MetricCard label="Expenses" value={peso(selectedReport.totalExpenses)} />
+                    <MetricCard label="Net Savings" value={peso(selectedReport.netSavings)} />
+                    <MetricCard label="Savings Entries" value={peso(selectedReport.netSavingsEntries)} />
+                  </div>
+                  <div className="rounded-xl bg-muted/55 p-4 text-sm text-muted-foreground dark:bg-white/4">
+                    <p><strong>Top spending:</strong> {selectedReport.topCategories[0]?.name ?? "None"} at {peso(selectedReport.topCategories[0]?.amount ?? 0)}</p>
+                    <p className="mt-2"><strong>Income spent:</strong> {selectedReport.incomeSpentPercentage}%</p>
+                    <p className="mt-2"><strong>Budget used:</strong> {selectedReport.budgetUsedPercentage}%</p>
+                    <p className="mt-2"><strong>Budget compliance:</strong> {selectedReport.budgetComplianceCount}/{selectedReport.budgetCount} categories</p>
+                  </div>
+                  <p className={cx("rounded-xl p-3 text-sm font-bold", selectedReport.netSavings >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
+                    {selectedReport.statusMessage}
+                  </p>
                 </div>
-                <div className="rounded-xl bg-muted/55 p-4 text-sm text-muted-foreground dark:bg-white/4">
-                  <p><strong>Top spending:</strong> {analyticsData.topCategory.name} at {peso(analyticsData.topCategory.value)}</p>
-                  <p className="mt-2"><strong>Income spent:</strong> {totals.income > 0 ? Math.round((totals.totalExpenses / totals.income) * 100) : 0}%</p>
-                  <p className="mt-2"><strong>Budget used:</strong> {totals.totalBudget > 0 ? Math.round((totals.totalExpenses / totals.totalBudget) * 100) : 0}%</p>
-                  <p className="mt-2"><strong>Savings rate:</strong> {analyticsData.summary.savingsRate}%</p>
-                </div>
-                <p className={cx("rounded-xl p-3 text-sm font-bold", totals.remainingBalance >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
-                  {totals.remainingBalance >= 0 ? "✓ Healthy finances!" : "⚠ Watch your spending"}
-                </p>
-              </div>
+              ) : (
+                <EmptyState message="No reportable finance data yet" />
+              )
             ) : null}
           </div>
 
@@ -1817,7 +2113,7 @@ export function SpendWiseDashboard({
           ) : (
             <div className="flex justify-end gap-3 border-t border-border px-5 py-4">
               <AppButton variant="outline" onClick={resetModal}>Close</AppButton>
-              <AppButton onClick={() => window.print()}>Print</AppButton>
+              <AppButton onClick={() => exportReportPdf(selectedReport)}>Export PDF</AppButton>
             </div>
           )}
         </div>
