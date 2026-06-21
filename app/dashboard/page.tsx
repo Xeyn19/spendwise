@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { SpendWiseDashboard } from "@/components/spendwise-dashboard";
+import { emptyAnalyticsData } from "@/lib/analytics-shared";
+import { listUserAnalytics } from "@/lib/analytics";
 import { listUserBudgets } from "@/lib/budgets";
 import { listUserExpenses } from "@/lib/expenses";
 import { toExpenseTransaction } from "@/lib/expense-shared";
@@ -38,6 +40,7 @@ export default async function DashboardPage() {
     goals: [],
     entries: [],
   };
+  let analytics: Awaited<ReturnType<typeof listUserAnalytics>> = emptyAnalyticsData;
 
   try {
     incomes = await listUserIncomes();
@@ -63,6 +66,12 @@ export default async function DashboardPage() {
     console.error("Could not load savings for dashboard.", error);
   }
 
+  try {
+    analytics = await listUserAnalytics();
+  } catch (error) {
+    console.error("Could not load analytics for dashboard.", error);
+  }
+
   const recentTransactions = [
     ...incomes.map(toIncomeTransaction),
     ...expenses.map(toExpenseTransaction),
@@ -81,6 +90,7 @@ export default async function DashboardPage() {
       initialSavingsGoals={savings.goals}
       initialSavingsEntries={savings.entries}
       initialTransactions={recentTransactions}
+      initialAnalyticsData={analytics}
       todayIso={todayIso}
     />
   );

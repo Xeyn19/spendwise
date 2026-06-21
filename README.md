@@ -30,7 +30,7 @@ SpendWise is a Next.js 16 personal finance application with:
 ### Not fully completed yet
 
 - fully unified transactions data source
-- fully server-driven analytics and reporting
+- fully server-driven reporting
 - separate route-level dashboard pages
 
 ## Tech Stack
@@ -239,6 +239,6 @@ For Vercel deployment:
 ## Next Recommended Work
 
 1. Unify transactions on the server
-2. Move analytics and reports fully to persisted data
+2. Move reports fully to persisted data
 3. Add edit/delete support for individual savings entries
 4. Split dashboard subviews into route-level pages if needed
