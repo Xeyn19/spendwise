@@ -1,0 +1,4 @@
+interface:
+  display_name: "Security Scan"
+  short_description: "Audit project security risks"
+  default_prompt: "Use $security-scan to audit this project for security risks."
