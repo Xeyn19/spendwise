@@ -7,8 +7,8 @@ SpendWise is a Next.js 16 App Router application for personal finance tracking. 
 - a public marketing site
 - Supabase-backed authentication
 - a protected dashboard workspace
-- database-backed finance modules for incomes, budgets, and expenses
-- local/demo-only savings, analytics, and reporting layers that are still being completed
+- database-backed finance modules for incomes, budgets, expenses, and savings
+- derived analytics and reporting layers that are still being completed
 
 The current architecture is intentionally hybrid:
 
@@ -18,9 +18,8 @@ The current architecture is intentionally hybrid:
   - incomes
   - budgets
   - expenses
-- **implemented in UI but not yet persisted**
   - savings goals
-  - savings contributions
+  - savings entries
 - **implemented as derived views**
   - dashboard summaries
   - budget progress
@@ -311,6 +310,53 @@ Security:
 - RLS enabled
 - users can select, insert, update, and delete only their own rows
 
+### `public.savings_goals`
+
+Purpose:
+
+- stores one row per savings target
+
+Columns:
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Savings goal UUID |
+| `user_id` | Owner user |
+| `name` | Goal name |
+| `target_amount` | Target amount |
+| `created_at` | Created timestamp |
+| `updated_at` | Updated timestamp |
+
+Security:
+
+- RLS enabled
+- users can select, insert, update, and delete only their own rows
+
+### `public.savings_entries`
+
+Purpose:
+
+- stores dated savings contributions and withdrawals
+
+Columns:
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Savings entry UUID |
+| `user_id` | Owner user |
+| `goal_id` | Parent savings goal |
+| `type` | `contribution` or `withdrawal` |
+| `amount` | Positive entry amount |
+| `entry_date` | Entry date |
+| `note` | Optional note |
+| `created_at` | Created timestamp |
+| `updated_at` | Updated timestamp |
+
+Security:
+
+- RLS enabled
+- users can manage only entries attached to their own goals
+
 ## 7.2 Shared database functions and triggers
 
 ### `public.set_updated_at()`
@@ -325,6 +371,8 @@ Attached to:
 - `public.incomes`
 - `public.budgets`
 - `public.expenses`
+- `public.savings_goals`
+- `public.savings_entries`
 
 ### `public.handle_new_user()`
 
@@ -364,7 +412,7 @@ Instead:
 
 - `total income` = sum of income rows
 - `total expenses` = sum of expense rows
-- `remaining balance` = income minus expenses minus savings contributions/demo savings
+- `remaining balance` = income minus expenses minus net savings entries
 - `budget spent` = sum of matching expenses
 - `budget remaining` = `allocated_amount - matched expense total`
 
@@ -412,9 +460,9 @@ When deleting income:
 | Incomes | `public.incomes` |
 | Budgets | `public.budgets` |
 | Expenses | `public.expenses` |
-| Savings goals | Local dashboard state |
-| Savings contributions | Local dashboard state |
-| Recent transactions | Derived from incomes + expenses + local savings events |
+| Savings goals | `public.savings_goals` |
+| Savings entries | `public.savings_entries` |
+| Recent transactions | Derived from incomes + expenses + savings entries |
 | Analytics | Derived in dashboard client component |
 | Reports | Derived in dashboard client component |
 
@@ -428,9 +476,10 @@ When deleting income:
 4. Incomes are loaded through `listUserIncomes()`
 5. Budgets are loaded through `listUserBudgets()`
 6. Expenses are loaded through `listUserExpenses()`
-7. Recent transactions are derived server-side from incomes and expenses
-8. Data is passed into `SpendWiseDashboard`
-9. Client derives totals, chart datasets, and page-level views
+7. Savings goals and entries are loaded through `listUserSavings()`
+8. Recent transactions are derived server-side from incomes, expenses, and savings entries
+9. Data is passed into `SpendWiseDashboard`
+10. Client derives totals, chart datasets, and page-level views
 
 ### Server-side loaders
 
@@ -439,6 +488,7 @@ Files:
 - [lib/incomes.ts](/E:/my-codes/spendwise/lib/incomes.ts:1)
 - [lib/budgets.ts](/E:/my-codes/spendwise/lib/budgets.ts:1)
 - [lib/expenses.ts](/E:/my-codes/spendwise/lib/expenses.ts:1)
+- [lib/savings.ts](/E:/my-codes/spendwise/lib/savings.ts:1)
 
 All loaders:
 
@@ -469,6 +519,12 @@ Finance mutations live in:
 - `createExpenseAction`
 - `deleteExpenseAction`
 
+### Savings actions
+
+- `createSavingsGoalAction`
+- `deleteSavingsGoalAction`
+- `createSavingsEntryAction`
+
 ### Mutation behavior
 
 All current finance server actions:
@@ -492,7 +548,7 @@ This component is responsible for:
 - optimistic/local state integration after successful server actions
 - derived finance metrics
 - charts and summary cards
-- local savings UI
+- savings goal and entry UI
 
 ### Derived client calculations
 
@@ -506,7 +562,7 @@ The dashboard derives:
 
 ### Why this matters
 
-The dashboard is currently the application composition layer, not just a visual layer. It coordinates both persisted data and remaining local-only features.
+The dashboard is currently the application composition layer, not just a visual layer. It coordinates persisted data and derived finance views.
 
 ## 13. Current File Responsibilities
 
@@ -529,28 +585,23 @@ The app is functional, but not yet a fully persisted finance platform.
 
 Remaining gaps:
 
-- savings goals are local-only
-- savings contributions are local-only
-- recent transactions are still partially derived from local savings state
 - analytics and reports are not yet fully server-driven
 - dashboard subpages are not yet independent routes
 
 ## 15. Recommended Next Steps
 
-1. Add persisted `savings_goals`
-2. Add persisted `savings_contributions`
-3. Replace local savings state with database-backed server actions
-4. Move recent transactions to a unified server query
-5. Move analytics/report computations to persisted data sources
-6. Consider splitting dashboard subviews into route-level pages if complexity grows
+1. Move recent transactions to a unified server query
+2. Move analytics/report computations to persisted data sources
+3. Consider adding edit/delete support for individual savings entries
+4. Consider splitting dashboard subviews into route-level pages if complexity grows
 
 ## 16. Architecture Summary
 
 SpendWise is currently best understood as:
 
 - a production-style auth and protected-app shell
-- a database-backed personal finance dashboard for incomes, budgets, and expenses
-- a partially transitional product where savings and some reporting remain local/demo state
+- a database-backed personal finance dashboard for incomes, budgets, expenses, and savings
+- a partially transitional product where analytics and reporting remain derived in the client
 
 The important system invariant is:
 

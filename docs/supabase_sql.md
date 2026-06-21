@@ -721,3 +721,182 @@ for delete
 to authenticated
 using ((select auth.uid()) = user_id);
 ```
+
+## 22. Create the `savings_goals` Table
+
+```sql
+create extension if not exists pgcrypto;
+
+create table if not exists public.savings_goals (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  name text not null,
+  target_amount numeric(12, 2) not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint savings_goals_name_not_blank check (btrim(name) <> ''),
+  constraint savings_goals_target_positive check (target_amount > 0)
+);
+
+create index if not exists idx_savings_goals_user_created_at_desc
+  on public.savings_goals (user_id, created_at desc);
+```
+
+## 23. Create the `savings_entries` Table
+
+```sql
+create table if not exists public.savings_entries (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  goal_id uuid not null references public.savings_goals (id) on delete cascade,
+  type text not null,
+  amount numeric(12, 2) not null,
+  entry_date date not null,
+  note text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint savings_entries_type_valid check (type in ('contribution', 'withdrawal')),
+  constraint savings_entries_amount_positive check (amount > 0)
+);
+
+create index if not exists idx_savings_entries_user_entry_date_desc
+  on public.savings_entries (user_id, entry_date desc, created_at desc);
+
+create index if not exists idx_savings_entries_user_goal_entry_date_desc
+  on public.savings_entries (user_id, goal_id, entry_date desc, created_at desc);
+```
+
+## 24. Attach the `updated_at` Trigger to Savings Tables
+
+This reuses the existing `public.set_updated_at()` function from section 2.
+
+```sql
+drop trigger if exists set_savings_goals_updated_at on public.savings_goals;
+
+create trigger set_savings_goals_updated_at
+before update on public.savings_goals
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists set_savings_entries_updated_at on public.savings_entries;
+
+create trigger set_savings_entries_updated_at
+before update on public.savings_entries
+for each row
+execute function public.set_updated_at();
+```
+
+## 25. Enable Row Level Security for Savings Tables
+
+```sql
+alter table public.savings_goals enable row level security;
+alter table public.savings_entries enable row level security;
+```
+
+## 26. Create RLS Policies for Savings Tables
+
+### 26.1 Allow users to manage only their own savings goals
+
+```sql
+drop policy if exists "Users can view own savings goals" on public.savings_goals;
+create policy "Users can view own savings goals"
+on public.savings_goals
+for select
+to authenticated
+using ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can insert own savings goals" on public.savings_goals;
+create policy "Users can insert own savings goals"
+on public.savings_goals
+for insert
+to authenticated
+with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can update own savings goals" on public.savings_goals;
+create policy "Users can update own savings goals"
+on public.savings_goals
+for update
+to authenticated
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can delete own savings goals" on public.savings_goals;
+create policy "Users can delete own savings goals"
+on public.savings_goals
+for delete
+to authenticated
+using ((select auth.uid()) = user_id);
+```
+
+### 26.2 Allow users to manage only entries for their own goals
+
+```sql
+drop policy if exists "Users can view own savings entries" on public.savings_entries;
+create policy "Users can view own savings entries"
+on public.savings_entries
+for select
+to authenticated
+using (
+  (select auth.uid()) = user_id
+  and exists (
+    select 1
+    from public.savings_goals
+    where savings_goals.id = savings_entries.goal_id
+      and savings_goals.user_id = (select auth.uid())
+  )
+);
+
+drop policy if exists "Users can insert own savings entries" on public.savings_entries;
+create policy "Users can insert own savings entries"
+on public.savings_entries
+for insert
+to authenticated
+with check (
+  (select auth.uid()) = user_id
+  and exists (
+    select 1
+    from public.savings_goals
+    where savings_goals.id = savings_entries.goal_id
+      and savings_goals.user_id = (select auth.uid())
+  )
+);
+
+drop policy if exists "Users can update own savings entries" on public.savings_entries;
+create policy "Users can update own savings entries"
+on public.savings_entries
+for update
+to authenticated
+using (
+  (select auth.uid()) = user_id
+  and exists (
+    select 1
+    from public.savings_goals
+    where savings_goals.id = savings_entries.goal_id
+      and savings_goals.user_id = (select auth.uid())
+  )
+)
+with check (
+  (select auth.uid()) = user_id
+  and exists (
+    select 1
+    from public.savings_goals
+    where savings_goals.id = savings_entries.goal_id
+      and savings_goals.user_id = (select auth.uid())
+  )
+);
+
+drop policy if exists "Users can delete own savings entries" on public.savings_entries;
+create policy "Users can delete own savings entries"
+on public.savings_entries
+for delete
+to authenticated
+using (
+  (select auth.uid()) = user_id
+  and exists (
+    select 1
+    from public.savings_goals
+    where savings_goals.id = savings_entries.goal_id
+      and savings_goals.user_id = (select auth.uid())
+  )
+);
+```

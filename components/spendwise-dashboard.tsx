@@ -42,9 +42,12 @@ import {
   createBudgetAction,
   createExpenseAction,
   createIncomeAction,
+  createSavingsEntryAction,
+  createSavingsGoalAction,
   deleteBudgetAction,
   deleteExpenseAction,
   deleteIncomeAction,
+  deleteSavingsGoalAction,
   updateBudgetAction,
 } from "@/app/dashboard/actions";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -53,6 +56,8 @@ import type { ExpenseRecord, ExpenseTransaction } from "@/lib/expense-shared";
 import { normalizeCategoryKey, toExpenseTransaction } from "@/lib/expense-shared";
 import type { IncomeRecord, IncomeTransaction } from "@/lib/income-shared";
 import { toIncomeTransaction } from "@/lib/income-shared";
+import type { SavingsEntryRecord, SavingsTransaction, SavingsGoalRecord } from "@/lib/savings-shared";
+import { toSavingsTransaction } from "@/lib/savings-shared";
 
 type ActivePage =
   | "Dashboard"
@@ -81,12 +86,9 @@ type DerivedExpense = Expense & {
   isBudgeted: boolean;
 };
 
-type SavingsGoal = {
-  id: number;
-  name: string;
-  target: number;
-  saved: number;
-};
+type SavingsGoal = SavingsGoalRecord;
+
+type SavingsEntry = SavingsEntryRecord;
 
 type Transaction = {
   id: string;
@@ -128,11 +130,6 @@ const initialBudgets: Array<{
   { id: 4, category: "Utilities", icon: "💡", allocated: 2500, spent: 1200 },
 ];
 
-const initialSavingsGoals: SavingsGoal[] = [
-  { id: 1, name: "Emergency Fund", target: 50000, saved: 12000 },
-  { id: 2, name: "Vacation Fund", target: 30000, saved: 8500 },
-];
-
 const baseMonthlyChartData = [
   { month: "Jan", income: 46000, expenses: 26800 },
   { month: "Feb", income: 48000, expenses: 28400 },
@@ -146,7 +143,9 @@ const pieColors = ["#16a34a", "#2563eb", "#ef4444", "#a855f7", "#f59e0b", "#06b6
 const iconOptions = ["🍽️", "🚗", "🛍️", "💡", "🏠"];
 
 function peso(amount: number) {
-  return `₱${amount.toLocaleString()}`;
+  return amount < 0
+    ? `-₱${Math.abs(amount).toLocaleString()}`
+    : `₱${amount.toLocaleString()}`;
 }
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -168,6 +167,17 @@ function sortBudgetRecords(rows: StoredBudget[]) {
 }
 
 function sortExpenses(rows: Expense[]) {
+  return [...rows].sort((a, b) => {
+    const dateOrder = b.date.localeCompare(a.date);
+    return dateOrder !== 0 ? dateOrder : b.createdAt.localeCompare(a.createdAt);
+  });
+}
+
+function sortSavingsGoals(rows: SavingsGoal[]) {
+  return [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function sortSavingsEntries(rows: SavingsEntry[]) {
   return [...rows].sort((a, b) => {
     const dateOrder = b.date.localeCompare(a.date);
     return dateOrder !== 0 ? dateOrder : b.createdAt.localeCompare(a.createdAt);
@@ -201,9 +211,10 @@ function barTone(percent: number) {
   return "bg-emerald-600";
 }
 
-function amountClass(type: Transaction["type"]) {
-  if (type === "Income") return "text-emerald-700";
-  if (type === "Savings") return "text-blue-700";
+function amountClass(transaction: Transaction) {
+  if (transaction.type === "Income") return "text-emerald-700";
+  if (transaction.type === "Savings" && transaction.amount < 0) return "text-red-600";
+  if (transaction.type === "Savings") return "text-blue-700";
   return "text-red-600";
 }
 
@@ -338,6 +349,8 @@ export function SpendWiseDashboard({
   initialIncomes,
   initialBudgets,
   initialExpenses,
+  initialSavingsGoals,
+  initialSavingsEntries,
   initialTransactions,
   todayIso,
 }: {
@@ -345,7 +358,9 @@ export function SpendWiseDashboard({
   initialIncomes: Income[];
   initialBudgets: StoredBudget[];
   initialExpenses: Expense[];
-  initialTransactions: Array<IncomeTransaction | ExpenseTransaction>;
+  initialSavingsGoals: SavingsGoal[];
+  initialSavingsEntries: SavingsEntry[];
+  initialTransactions: Array<IncomeTransaction | ExpenseTransaction | SavingsTransaction>;
   todayIso: string;
 }) {
   const initials = React.useMemo(
@@ -376,11 +391,13 @@ export function SpendWiseDashboard({
   const [isMutatingIncome, startIncomeMutation] = React.useTransition();
   const [isMutatingBudget, startBudgetMutation] = React.useTransition();
   const [isMutatingExpense, startExpenseMutation] = React.useTransition();
+  const [isMutatingSavings, startSavingsMutation] = React.useTransition();
 
   const [incomes, setIncomes] = React.useState<Income[]>(initialIncomes);
   const [budgetRecords, setBudgetRecords] = React.useState<StoredBudget[]>(initialBudgets);
   const [expenses, setExpenses] = React.useState<Expense[]>(sortExpenses(initialExpenses));
   const [savingsGoals, setSavingsGoals] = React.useState<SavingsGoal[]>(initialSavingsGoals);
+  const [savingsEntries, setSavingsEntries] = React.useState<SavingsEntry[]>(initialSavingsEntries);
   const [transactions, setTransactions] = React.useState<Transaction[]>(() => [...initialTransactions]);
 
   const [forms, setForms] = React.useState({
@@ -400,6 +417,9 @@ export function SpendWiseDashboard({
     goalName: "",
     targetAmount: "",
     initialSaved: "",
+    savingsEntryType: "contribution",
+    savingsEntryDate: todayIso,
+    savingsEntryNote: "",
     contributionAmount: "",
   });
   const [errors, setErrors] = React.useState<Record<string, string>>({});
@@ -466,7 +486,7 @@ export function SpendWiseDashboard({
     const totalBudget = budgets.reduce((sum, item) => sum + item.allocated, 0);
     const totalExpenses = derivedExpenses.reduce((sum, item) => sum + item.amount, 0);
     const budgetedExpenses = budgets.reduce((sum, item) => sum + item.spent, 0);
-    const totalSavings = savingsGoals.reduce((sum, item) => sum + item.saved, 0);
+    const totalSavings = savingsGoals.reduce((sum, item) => sum + item.savedAmount, 0);
     const remainingBalance = income - totalExpenses - totalSavings;
     const budgetRemaining = totalBudget - budgetedExpenses;
     return { income, totalBudget, totalExpenses, totalSavings, remainingBalance, budgetRemaining };
@@ -518,6 +538,11 @@ export function SpendWiseDashboard({
   const recentTransactions = React.useMemo(
     () => [...transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10),
     [transactions]
+  );
+
+  const recentSavingsEntries = React.useMemo(
+    () => sortSavingsEntries(savingsEntries).slice(0, 5),
+    [savingsEntries]
   );
 
   const categories = React.useMemo(
@@ -577,13 +602,6 @@ export function SpendWiseDashboard({
     setErrors({});
   }, []);
 
-  const addTransaction = React.useCallback((transaction: Omit<Transaction, "id">) => {
-    setTransactions((current) => [
-      { ...transaction, id: `${transaction.type.toLowerCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}` },
-      ...current,
-    ]);
-  }, []);
-
   const openBudgetModal = React.useCallback((budget?: Budget) => {
     if (budget) {
       setEditingBudget(budget);
@@ -610,12 +628,18 @@ export function SpendWiseDashboard({
     setModal("budget");
   }, [todayIso]);
 
-  const openContributionModal = React.useCallback((goal: SavingsGoal) => {
+  const openSavingsEntryModal = React.useCallback((goal: SavingsGoal, entryType: "contribution" | "withdrawal") => {
     setContributionGoal(goal);
-    setForms((current) => ({ ...current, contributionAmount: "" }));
+    setForms((current) => ({
+      ...current,
+      savingsEntryType: entryType,
+      savingsEntryDate: todayIso,
+      savingsEntryNote: "",
+      contributionAmount: "",
+    }));
     setErrors({});
     setModal("contribution");
-  }, []);
+  }, [todayIso]);
 
   const saveIncome = React.useCallback(() => {
     const nextErrors: Record<string, string> = {};
@@ -756,47 +780,109 @@ export function SpendWiseDashboard({
     if (!forms.goalName.trim()) nextErrors.goalName = "Goal name is required.";
     if (!target || target <= 0) nextErrors.targetAmount = "Target must be greater than 0.";
     if (saved < 0) nextErrors.initialSaved = "Saved amount cannot be negative.";
+    if (saved > 0 && !forms.savingsEntryDate) nextErrors.savingsEntryDate = "Date is required.";
     if (Object.keys(nextErrors).length) {
       setErrors(nextErrors);
       return;
     }
 
-    const goal = { id: Date.now(), name: forms.goalName.trim(), target, saved };
-    setSavingsGoals((current) => [goal, ...current]);
-    if (saved > 0) {
-      addTransaction({
-        date: todayIso,
-        type: "Savings",
-        category: goal.name,
-        amount: saved,
-        note: "Initial savings",
-      });
-    }
-    setForms((current) => ({ ...current, goalName: "", targetAmount: "", initialSaved: "" }));
-    resetModal();
-  }, [addTransaction, forms.goalName, forms.initialSaved, forms.targetAmount, resetModal, todayIso]);
+    const formData = new FormData();
+    formData.set("name", forms.goalName.trim());
+    formData.set("targetAmount", String(target));
+    formData.set("initialSaved", String(saved || 0));
+    formData.set("entryDate", forms.savingsEntryDate);
 
-  const saveContribution = React.useCallback(() => {
+    startSavingsMutation(async () => {
+      const result = await createSavingsGoalAction(formData);
+
+      if (!result.success || !result.goal) {
+        toast.error(result.message ?? "Could not save savings goal.");
+        return;
+      }
+
+      setSavingsGoals((current) => sortSavingsGoals([result.goal!, ...current]));
+
+      if (result.entry) {
+        setSavingsEntries((current) => sortSavingsEntries([result.entry!, ...current]));
+        setTransactions((current) => [toSavingsTransaction(result.entry!), ...current]);
+      }
+
+      setForms((current) => ({
+        ...current,
+        goalName: "",
+        targetAmount: "",
+        initialSaved: "",
+        savingsEntryDate: todayIso,
+      }));
+      resetModal();
+      toast.success("Savings goal saved.");
+    });
+  }, [
+    forms.goalName,
+    forms.initialSaved,
+    forms.savingsEntryDate,
+    forms.targetAmount,
+    resetModal,
+    startSavingsMutation,
+    todayIso,
+  ]);
+
+  const saveSavingsEntry = React.useCallback(() => {
     if (!contributionGoal) return;
     const amount = Number(forms.contributionAmount);
     if (!amount || amount <= 0) {
       setErrors({ contributionAmount: "Amount must be greater than 0." });
       return;
     }
-    setSavingsGoals((current) =>
-      current.map((goal) =>
-        goal.id === contributionGoal.id ? { ...goal, saved: goal.saved + amount } : goal
-      )
-    );
-    addTransaction({
-      date: todayIso,
-      type: "Savings",
-      category: contributionGoal.name,
-      amount,
-      note: "Goal contribution",
+    if (!forms.savingsEntryDate) {
+      setErrors({ savingsEntryDate: "Date is required." });
+      return;
+    }
+
+    const formData = new FormData();
+    formData.set("type", forms.savingsEntryType);
+    formData.set("amount", String(amount));
+    formData.set("entryDate", forms.savingsEntryDate);
+    formData.set("note", forms.savingsEntryNote.trim());
+
+    startSavingsMutation(async () => {
+      const result = await createSavingsEntryAction(contributionGoal.id, formData);
+
+      if (!result.success || !result.goal || !result.entry) {
+        toast.error(result.message ?? "Could not save savings entry.");
+        return;
+      }
+
+      setSavingsGoals((current) =>
+        sortSavingsGoals(
+          current.map((goal) => (goal.id === result.goal!.id ? result.goal! : goal))
+        )
+      );
+      setSavingsEntries((current) => sortSavingsEntries([result.entry!, ...current]));
+      setTransactions((current) => [toSavingsTransaction(result.entry!), ...current]);
+      setForms((current) => ({
+        ...current,
+        contributionAmount: "",
+        savingsEntryNote: "",
+        savingsEntryDate: todayIso,
+      }));
+      resetModal();
+      toast.success(
+        forms.savingsEntryType === "withdrawal"
+          ? "Savings withdrawal saved."
+          : "Savings contribution saved."
+      );
     });
-    resetModal();
-  }, [addTransaction, contributionGoal, forms.contributionAmount, resetModal, todayIso]);
+  }, [
+    contributionGoal,
+    forms.contributionAmount,
+    forms.savingsEntryDate,
+    forms.savingsEntryNote,
+    forms.savingsEntryType,
+    resetModal,
+    startSavingsMutation,
+    todayIso,
+  ]);
 
   const deleteIncome = React.useCallback((income: Income) => {
     startIncomeMutation(async () => {
@@ -845,11 +931,29 @@ export function SpendWiseDashboard({
     });
   }, []);
 
-  const clearAllData = React.useCallback(() => {
-    setSavingsGoals([]);
-    setTransactions((current) => current.filter((transaction) => transaction.type !== "Savings"));
-    setDeleteTarget(null);
-  }, []);
+  const deleteSavingsGoal = React.useCallback((goal: SavingsGoal) => {
+    startSavingsMutation(async () => {
+      const result = await deleteSavingsGoalAction(goal.id);
+
+      if (!result.success) {
+        toast.error(result.message ?? "Could not delete savings goal.");
+        return;
+      }
+
+      setSavingsGoals((current) => current.filter((item) => item.id !== goal.id));
+      setSavingsEntries((current) => current.filter((entry) => entry.goalId !== goal.id));
+      setTransactions((current) =>
+        current.filter((transaction) => {
+          if (transaction.type !== "Savings") return true;
+          return !savingsEntries.some(
+            (entry) => entry.goalId === goal.id && transaction.id === `savings-${entry.id}`
+          );
+        })
+      );
+      setDeleteTarget(null);
+      toast.success("Savings goal deleted.");
+    });
+  }, [savingsEntries, startSavingsMutation]);
 
   const renderDeleteConfirm = React.useCallback(
     (target: string, onYes: () => void) =>
@@ -857,7 +961,7 @@ export function SpendWiseDashboard({
         <div className="flex items-center gap-2 text-xs font-semibold">
           <span className="text-slate-500">Are you sure?</span>
           <button className="text-emerald-700 hover:underline" onClick={onYes}>
-            {isMutatingIncome || isMutatingBudget || isMutatingExpense ? "..." : "Yes"}
+            {isMutatingIncome || isMutatingBudget || isMutatingExpense || isMutatingSavings ? "..." : "Yes"}
           </button>
           <button className="text-slate-500 hover:underline" onClick={() => setDeleteTarget(null)}>
             No
@@ -872,7 +976,7 @@ export function SpendWiseDashboard({
           <Trash2 className="size-4" />
         </button>
       ),
-    [deleteTarget, isMutatingBudget, isMutatingExpense, isMutatingIncome]
+    [deleteTarget, isMutatingBudget, isMutatingExpense, isMutatingIncome, isMutatingSavings]
   );
 
   const sidebar = (
@@ -1251,23 +1355,70 @@ export function SpendWiseDashboard({
     return (
       <div className="space-y-6">
         <PageHeader title="Savings Goals" actionLabel="Add Savings Goal" onAction={() => setModal("savings")} />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {savingsGoals.map((goal) => (
-            <Panel key={goal.id}>
-              <SavingsProgress goal={goal} />
-              <div className="mt-5 flex items-center justify-between gap-3">
-                <AppButton variant="outline" onClick={() => openContributionModal(goal)}>
-                  <Plus className="size-4" />
-                  Add Contribution
-                </AppButton>
-                {renderDeleteConfirm(`goal-${goal.id}`, () => {
-                  setSavingsGoals((current) => current.filter((item) => item.id !== goal.id));
-                  setDeleteTarget(null);
-                })}
-              </div>
-            </Panel>
-          ))}
-        </div>
+        {savingsGoals.length === 0 ? (
+          <EmptyState message="No savings goals yet" />
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {savingsGoals.map((goal) => (
+              <Panel key={goal.id}>
+                <SavingsProgress goal={goal} />
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap gap-2">
+                    <AppButton variant="outline" onClick={() => openSavingsEntryModal(goal, "contribution")}>
+                      <Plus className="size-4" />
+                      Add Contribution
+                    </AppButton>
+                    <AppButton variant="outline" onClick={() => openSavingsEntryModal(goal, "withdrawal")}>
+                      Withdraw
+                    </AppButton>
+                  </div>
+                  {renderDeleteConfirm(`goal-${goal.id}`, () => deleteSavingsGoal(goal))}
+                </div>
+              </Panel>
+            ))}
+          </div>
+        )}
+        <Panel>
+          <SectionTitle title="Recent Savings Activity" subtitle="Latest persisted entries" />
+          <div className="mt-5">
+            {recentSavingsEntries.length === 0 ? (
+              <EmptyState message="No savings activity yet" />
+            ) : (
+              <ResponsiveTable>
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th className="py-3 pr-4">Date</th>
+                    <th className="py-3 pr-4">Goal</th>
+                    <th className="py-3 pr-4">Type</th>
+                    <th className="py-3 pr-4">Amount</th>
+                    <th className="py-3">Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentSavingsEntries.map((entry) => {
+                    const signedAmount = entry.type === "withdrawal" ? -entry.amount : entry.amount;
+
+                    return (
+                      <tr key={entry.id} className="border-b border-slate-100 text-sm last:border-0">
+                        <td className="py-4 pr-4 text-slate-500">{entry.date}</td>
+                        <td className="py-4 pr-4 font-semibold text-slate-900">{entry.goalName}</td>
+                        <td className="py-4 pr-4">
+                          <Badge tone={entry.type === "withdrawal" ? "amber" : "blue"}>
+                            {entry.type === "withdrawal" ? "Withdrawal" : "Contribution"}
+                          </Badge>
+                        </td>
+                        <td className={cx("py-4 pr-4 font-bold", signedAmount < 0 ? "text-red-600" : "text-blue-700")}>
+                          {peso(signedAmount)}
+                        </td>
+                        <td className="py-4 text-slate-500">{entry.note || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </ResponsiveTable>
+            )}
+          </div>
+        </Panel>
       </div>
     );
   }
@@ -1410,26 +1561,6 @@ export function SpendWiseDashboard({
             <ToggleRow label="Notification reminders" checked={notifications} onChange={setNotifications} />
           </div>
         </Panel>
-        <Panel className="border-red-200">
-          <SectionTitle title="Danger Zone" subtitle="Remove local demo savings only" />
-          <div className="mt-5">
-            {deleteTarget === "clear-all" ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="font-semibold text-red-700">Clear local savings data?</span>
-                <AppButton variant="danger" onClick={clearAllData}>
-                  Yes, clear data
-                </AppButton>
-                <AppButton variant="outline" onClick={() => setDeleteTarget(null)}>
-                  Cancel
-                </AppButton>
-              </div>
-            ) : (
-              <AppButton variant="danger" onClick={() => setDeleteTarget("clear-all")}>
-                Clear Demo Data
-              </AppButton>
-            )}
-          </div>
-        </Panel>
       </div>
     );
   }
@@ -1444,11 +1575,13 @@ export function SpendWiseDashboard({
             : "Create Budget"
           : modal === "expense"
             ? "Add Expense"
-            : modal === "savings"
-              ? "Add Savings Goal"
-              : modal === "contribution"
-                ? "Add Contribution"
-                : "Financial Report";
+          : modal === "savings"
+            ? "Add Savings Goal"
+            : modal === "contribution"
+              ? forms.savingsEntryType === "withdrawal"
+                ? "Add Withdrawal"
+                : "Add Contribution"
+              : "Financial Report";
 
     return (
       <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4">
@@ -1555,16 +1688,31 @@ export function SpendWiseDashboard({
                 <Field label="Initial Saved Amount" error={errors.initialSaved}>
                   <TextInput type="number" value={forms.initialSaved} invalid={!!errors.initialSaved} onChange={(e) => updateForm("initialSaved", e.target.value)} placeholder="₱0" />
                 </Field>
+                <Field label="Initial Saved Date" error={errors.savingsEntryDate}>
+                  <TextInput type="date" value={forms.savingsEntryDate} invalid={!!errors.savingsEntryDate} onChange={(e) => updateForm("savingsEntryDate", e.target.value)} />
+                </Field>
               </>
             ) : null}
 
             {modal === "contribution" ? (
               <>
                 <p className="rounded-xl bg-muted/55 p-3 text-sm font-semibold text-foreground dark:bg-white/4">
-                  Add to {contributionGoal?.name}
+                  {forms.savingsEntryType === "withdrawal" ? "Withdraw from" : "Add to"} {contributionGoal?.name}
                 </p>
-                <Field label="Contribution Amount" error={errors.contributionAmount}>
+                <Field label="Type">
+                  <SelectInput value={forms.savingsEntryType} onChange={(e) => updateForm("savingsEntryType", e.target.value)}>
+                    <option value="contribution">Contribution</option>
+                    <option value="withdrawal">Withdrawal</option>
+                  </SelectInput>
+                </Field>
+                <Field label={forms.savingsEntryType === "withdrawal" ? "Withdrawal Amount" : "Contribution Amount"} error={errors.contributionAmount}>
                   <TextInput type="number" value={forms.contributionAmount} invalid={!!errors.contributionAmount} onChange={(e) => updateForm("contributionAmount", e.target.value)} placeholder="₱0" />
+                </Field>
+                <Field label="Date" error={errors.savingsEntryDate}>
+                  <TextInput type="date" value={forms.savingsEntryDate} invalid={!!errors.savingsEntryDate} onChange={(e) => updateForm("savingsEntryDate", e.target.value)} />
+                </Field>
+                <Field label="Note">
+                  <TextInput value={forms.savingsEntryNote} onChange={(e) => updateForm("savingsEntryNote", e.target.value)} placeholder="Optional" />
                 </Field>
               </>
             ) : null}
@@ -1600,7 +1748,8 @@ export function SpendWiseDashboard({
                 disabled={
                   (modal === "income" && isMutatingIncome) ||
                   (modal === "budget" && isMutatingBudget) ||
-                  (modal === "expense" && isMutatingExpense)
+                  (modal === "expense" && isMutatingExpense) ||
+                  ((modal === "savings" || modal === "contribution") && isMutatingSavings)
                 }
                 onClick={
                   modal === "income"
@@ -1608,10 +1757,10 @@ export function SpendWiseDashboard({
                     : modal === "budget"
                       ? saveBudget
                       : modal === "expense"
-                        ? saveExpense
-                        : modal === "savings"
-                          ? saveSavingsGoal
-                          : saveContribution
+                      ? saveExpense
+                      : modal === "savings"
+                        ? saveSavingsGoal
+                        : saveSavingsEntry
                 }
               >
                 {modal === "income" && isMutatingIncome
@@ -1620,6 +1769,8 @@ export function SpendWiseDashboard({
                     ? "Saving..."
                     : modal === "expense" && isMutatingExpense
                       ? "Saving..."
+                      : (modal === "savings" || modal === "contribution") && isMutatingSavings
+                        ? "Saving..."
                     : "Save"}
               </AppButton>
             </div>
@@ -1689,7 +1840,7 @@ export function SpendWiseDashboard({
                       </Badge>
                     </td>
                     <td className="py-4 pr-4 font-semibold text-slate-900">{transaction.category}</td>
-                    <td className={cx("py-4 pr-4 font-bold", amountClass(transaction.type))}>{peso(transaction.amount)}</td>
+                    <td className={cx("py-4 pr-4 font-bold", amountClass(transaction))}>{peso(transaction.amount)}</td>
                     <td className="py-4 text-slate-500">{transaction.note || "—"}</td>
                   </tr>
                 ))}
@@ -1818,7 +1969,7 @@ function BudgetProgress({ budget }: { budget: Budget }) {
 }
 
 function SavingsProgress({ goal }: { goal: SavingsGoal }) {
-  const percent = pct(goal.saved, goal.target);
+  const percent = pct(goal.savedAmount, goal.targetAmount);
 
   return (
     <div>
@@ -1826,7 +1977,7 @@ function SavingsProgress({ goal }: { goal: SavingsGoal }) {
         <div>
           <h3 className="font-bold text-foreground dark:text-white">{goal.name}</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Target: {peso(goal.target)} | Saved: {peso(goal.saved)}
+            Target: {peso(goal.targetAmount)} | Saved: {peso(goal.savedAmount)}
           </p>
         </div>
         <span className="text-sm font-bold text-emerald-700">{percent}%</span>
@@ -1835,7 +1986,7 @@ function SavingsProgress({ goal }: { goal: SavingsGoal }) {
         <ProgressBar value={percent} tone="bg-emerald-600" />
       </div>
       <p className="mt-3 text-sm font-semibold text-muted-foreground">
-        {peso(Math.max(0, goal.target - goal.saved))} remaining to goal
+        {peso(goal.remainingAmount)} remaining to goal
       </p>
     </div>
   );

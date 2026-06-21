@@ -6,7 +6,8 @@ SpendWise is a Next.js 16 personal finance application with:
 - Supabase authentication
 - a protected dashboard
 - persisted income, budget, and expense tracking
-- local savings and reporting features that are still being completed
+- persisted savings goals and entries
+- reporting features that are still being completed
 
 ## Current Status
 
@@ -21,13 +22,13 @@ SpendWise is a Next.js 16 personal finance application with:
 - income CRUD flow used by the dashboard
 - budget CRUD flow used by the dashboard
 - expense create/delete flow used by the dashboard
+- savings goal create/delete flow used by the dashboard
+- savings contribution/withdrawal flow used by the dashboard
 - budget-to-income validation
 - expense-to-budget derived matching
 
 ### Not fully completed yet
 
-- persisted savings goals
-- persisted savings contributions
 - fully unified transactions data source
 - fully server-driven analytics and reporting
 - separate route-level dashboard pages
@@ -185,8 +186,8 @@ These are currently client-side sections inside one dashboard page, not separate
 | Incomes | Persisted |
 | Budgets | Persisted |
 | Expenses | Persisted |
-| Savings goals | Local only |
-| Savings contributions | Local only |
+| Savings goals | Persisted |
+| Savings entries | Persisted |
 
 ## Validation Rules
 
@@ -237,8 +238,7 @@ For Vercel deployment:
 
 ## Next Recommended Work
 
-1. Persist savings goals
-2. Persist savings contributions
-3. Unify transactions on the server
-4. Move analytics and reports fully to persisted data
-5. Split dashboard subviews into route-level pages if needed
+1. Unify transactions on the server
+2. Move analytics and reports fully to persisted data
+3. Add edit/delete support for individual savings entries
+4. Split dashboard subviews into route-level pages if needed

@@ -6,6 +6,8 @@ import { listUserExpenses } from "@/lib/expenses";
 import { toExpenseTransaction } from "@/lib/expense-shared";
 import { toIncomeTransaction } from "@/lib/income-shared";
 import { listUserIncomes } from "@/lib/incomes";
+import { listUserSavings } from "@/lib/savings";
+import { toSavingsTransaction } from "@/lib/savings-shared";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function DashboardPage() {
@@ -32,6 +34,10 @@ export default async function DashboardPage() {
   let incomes: Awaited<ReturnType<typeof listUserIncomes>> = [];
   let budgets: Awaited<ReturnType<typeof listUserBudgets>> = [];
   let expenses: Awaited<ReturnType<typeof listUserExpenses>> = [];
+  let savings: Awaited<ReturnType<typeof listUserSavings>> = {
+    goals: [],
+    entries: [],
+  };
 
   try {
     incomes = await listUserIncomes();
@@ -51,7 +57,17 @@ export default async function DashboardPage() {
     console.error("Could not load expenses for dashboard.", error);
   }
 
-  const recentTransactions = [...incomes.map(toIncomeTransaction), ...expenses.map(toExpenseTransaction)]
+  try {
+    savings = await listUserSavings();
+  } catch (error) {
+    console.error("Could not load savings for dashboard.", error);
+  }
+
+  const recentTransactions = [
+    ...incomes.map(toIncomeTransaction),
+    ...expenses.map(toExpenseTransaction),
+    ...savings.entries.map(toSavingsTransaction),
+  ]
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 10);
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -62,6 +78,8 @@ export default async function DashboardPage() {
       initialIncomes={incomes}
       initialBudgets={budgets}
       initialExpenses={expenses}
+      initialSavingsGoals={savings.goals}
+      initialSavingsEntries={savings.entries}
       initialTransactions={recentTransactions}
       todayIso={todayIso}
     />

@@ -47,15 +47,15 @@ The current app uses these database tables:
 - `public.incomes`
 - `public.budgets`
 - `public.expenses`
+- `public.savings_goals`
+- `public.savings_entries`
 
 Auth identity itself lives in:
 
 - `auth.users`
 
-Not yet persisted:
-
-- savings goals
-- savings contributions
+Savings is persisted as goals plus dated entries. Saved totals are derived from
+`public.savings_entries`, not stored directly on the goal row.
 
 ## 4. Required Environment Variables
 
@@ -187,6 +187,8 @@ Run the SQL from [docs/supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql
 4. incomes
 5. budgets
 6. expenses
+7. savings goals
+8. savings entries
 
 Recommended section checkpoints:
 
@@ -194,6 +196,7 @@ Recommended section checkpoints:
 - income schema: sections `7` to `11`
 - budget schema: sections `12` to `16`
 - expense schema: sections `17` to `21`
+- savings schema: sections `22` to `26`
 
 ## 7. Runtime Supabase Integration
 
@@ -289,6 +292,7 @@ Files:
 - [lib/incomes.ts](/E:/my-codes/spendwise/lib/incomes.ts:1)
 - [lib/budgets.ts](/E:/my-codes/spendwise/lib/budgets.ts:1)
 - [lib/expenses.ts](/E:/my-codes/spendwise/lib/expenses.ts:1)
+- [lib/savings.ts](/E:/my-codes/spendwise/lib/savings.ts:1)
 
 Each loader:
 
@@ -367,9 +371,14 @@ After configuration, confirm all of the following:
 - dashboard loads incomes
 - dashboard loads budgets
 - dashboard loads expenses
+- dashboard loads savings goals
+- dashboard loads savings entries
 - create/delete income works
 - create/update/delete budget works
 - create/delete expense works
+- create/delete savings goal works
+- create savings contribution works
+- create savings withdrawal works
 
 ## 13. Troubleshooting
 

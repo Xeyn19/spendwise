@@ -8,6 +8,8 @@ import { sanitizeErrorMessage } from "@/lib/error-message";
 import type { ExpenseRecord } from "@/lib/expense-shared";
 import { normalizeCategoryKey } from "@/lib/expense-shared";
 import type { IncomeRecord } from "@/lib/income-shared";
+import type { SavingsEntryRecord, SavingsEntryType, SavingsGoalRecord } from "@/lib/savings-shared";
+import { getSavingsEntrySignedAmount } from "@/lib/savings-shared";
 import { createClient } from "@/lib/supabase/server";
 
 type IncomeActionResult = {
@@ -31,6 +33,22 @@ type ExpenseActionResult = {
   deletedId?: string;
 };
 
+type SavingsGoalActionResult = {
+  success: boolean;
+  message?: string;
+  goal?: SavingsGoalRecord;
+  entry?: SavingsEntryRecord;
+  deletedId?: string;
+};
+
+type SavingsEntryActionResult = {
+  success: boolean;
+  message?: string;
+  goal?: SavingsGoalRecord;
+  entry?: SavingsEntryRecord;
+  deletedId?: string;
+};
+
 function parseAmount(value: string) {
   const amount = Number(value);
 
@@ -43,6 +61,97 @@ function parseAmount(value: string) {
 
 function isValidDateString(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function toSavingsGoalRecord(row: {
+  id: string;
+  name: string;
+  target_amount: number | string;
+  created_at: string;
+}, savedAmount = 0): SavingsGoalRecord {
+  const targetAmount = Number(row.target_amount);
+
+  return {
+    id: row.id,
+    name: row.name,
+    targetAmount,
+    savedAmount,
+    remainingAmount: Math.max(0, targetAmount - savedAmount),
+    createdAt: row.created_at,
+  };
+}
+
+function toSavingsEntryRecord(row: {
+  id: string;
+  goal_id: string;
+  type: SavingsEntryType;
+  amount: number | string;
+  entry_date: string;
+  note: string | null;
+  created_at: string;
+}, goalName: string): SavingsEntryRecord {
+  return {
+    id: row.id,
+    goalId: row.goal_id,
+    goalName,
+    type: row.type,
+    amount: Number(row.amount),
+    date: row.entry_date,
+    note: row.note ?? "",
+    createdAt: row.created_at,
+  };
+}
+
+async function getSavingsGoalWithSavedAmount({
+  goalId,
+  userId,
+}: {
+  goalId: string;
+  userId: string;
+}) {
+  const supabase = await createClient();
+  const { data: goal, error: goalError } = await supabase
+    .from("savings_goals")
+    .select("id, name, target_amount, created_at")
+    .eq("id", goalId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (goalError) {
+    return {
+      error: sanitizeErrorMessage(goalError.message, "Could not load savings goal."),
+    };
+  }
+
+  if (!goal) {
+    return { error: "Savings goal not found." };
+  }
+
+  const { data: entries, error: entriesError } = await supabase
+    .from("savings_entries")
+    .select("type, amount")
+    .eq("goal_id", goalId)
+    .eq("user_id", userId);
+
+  if (entriesError) {
+    return {
+      error: sanitizeErrorMessage(entriesError.message, "Could not load savings entries."),
+    };
+  }
+
+  const savedAmount = (entries ?? []).reduce(
+    (sum, entry) =>
+      sum +
+      getSavingsEntrySignedAmount({
+        type: entry.type as SavingsEntryType,
+        amount: Number(entry.amount),
+      }),
+    0
+  );
+
+  return {
+    goal: toSavingsGoalRecord(goal, savedAmount),
+  };
 }
 
 function toBudgetRecord(row: {
@@ -618,4 +727,214 @@ export async function deleteBudgetAction(budgetId: string): Promise<BudgetAction
   revalidatePath("/dashboard");
 
   return { success: true, deletedId: budgetId };
+}
+
+export async function createSavingsGoalAction(
+  formData: FormData
+): Promise<SavingsGoalActionResult> {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims?.sub;
+
+  if (!userId) {
+    redirect("/login");
+  }
+
+  const name = String(formData.get("name") ?? "").trim();
+  const targetAmountValue = String(formData.get("targetAmount") ?? "").trim();
+  const initialSavedValue = String(formData.get("initialSaved") ?? "").trim();
+  const targetAmount = parseAmount(targetAmountValue);
+  const initialSaved = initialSavedValue ? parseAmount(initialSavedValue) : 0;
+  const entryDate = String(formData.get("entryDate") ?? "").trim();
+
+  if (!name) {
+    return { success: false, message: "Goal name is required." };
+  }
+
+  if (!targetAmount || targetAmount <= 0) {
+    return { success: false, message: "Target must be greater than 0." };
+  }
+
+  if (initialSaved === null || initialSaved < 0) {
+    return { success: false, message: "Saved amount cannot be negative." };
+  }
+
+  if (initialSaved > 0 && !isValidDateString(entryDate)) {
+    return { success: false, message: "Savings date is required." };
+  }
+
+  const { data: goalData, error: goalError } = await supabase
+    .from("savings_goals")
+    .insert({
+      user_id: userId,
+      name,
+      target_amount: targetAmount,
+    })
+    .select("id, name, target_amount, created_at")
+    .single();
+
+  if (goalError) {
+    return {
+      success: false,
+      message: sanitizeErrorMessage(goalError.message, "Could not save savings goal."),
+    };
+  }
+
+  let entry: SavingsEntryRecord | undefined;
+
+  if (initialSaved > 0) {
+    const { data: entryData, error: entryError } = await supabase
+      .from("savings_entries")
+      .insert({
+        user_id: userId,
+        goal_id: goalData.id,
+        type: "contribution",
+        amount: initialSaved,
+        entry_date: entryDate,
+        note: "Initial savings",
+      })
+      .select("id, goal_id, type, amount, entry_date, note, created_at")
+      .single();
+
+    if (entryError) {
+      await supabase
+        .from("savings_goals")
+        .delete()
+        .eq("id", goalData.id)
+        .eq("user_id", userId);
+
+      return {
+        success: false,
+        message: sanitizeErrorMessage(entryError.message, "Could not save initial savings."),
+      };
+    }
+
+    entry = toSavingsEntryRecord(
+      { ...entryData, type: entryData.type as SavingsEntryType },
+      goalData.name
+    );
+  }
+
+  revalidatePath("/dashboard");
+
+  return {
+    success: true,
+    goal: toSavingsGoalRecord(goalData, initialSaved),
+    entry,
+  };
+}
+
+export async function deleteSavingsGoalAction(
+  goalId: string
+): Promise<SavingsGoalActionResult> {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims?.sub;
+
+  if (!userId) {
+    redirect("/login");
+  }
+
+  const { error } = await supabase
+    .from("savings_goals")
+    .delete()
+    .eq("id", goalId)
+    .eq("user_id", userId);
+
+  if (error) {
+    return {
+      success: false,
+      message: sanitizeErrorMessage(error.message, "Could not delete savings goal."),
+    };
+  }
+
+  revalidatePath("/dashboard");
+
+  return { success: true, deletedId: goalId };
+}
+
+export async function createSavingsEntryAction(
+  goalId: string,
+  formData: FormData
+): Promise<SavingsEntryActionResult> {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims?.sub;
+
+  if (!userId) {
+    redirect("/login");
+  }
+
+  const type = String(formData.get("type") ?? "").trim();
+  const amountValue = String(formData.get("amount") ?? "").trim();
+  const entryDate = String(formData.get("entryDate") ?? "").trim();
+  const note = String(formData.get("note") ?? "").trim();
+  const amount = parseAmount(amountValue);
+
+  if (type !== "contribution" && type !== "withdrawal") {
+    return { success: false, message: "Savings entry type is required." };
+  }
+
+  if (!amount || amount <= 0) {
+    return { success: false, message: "Amount must be greater than 0." };
+  }
+
+  if (!isValidDateString(entryDate)) {
+    return { success: false, message: "Date is required." };
+  }
+
+  const goalResult = await getSavingsGoalWithSavedAmount({ goalId, userId });
+
+  if (goalResult.error || !goalResult.goal) {
+    return {
+      success: false,
+      message: goalResult.error ?? "Savings goal not found.",
+    };
+  }
+
+  if (type === "withdrawal" && amount > goalResult.goal.savedAmount) {
+    return {
+      success: false,
+      message: "Withdrawal cannot be greater than the current saved amount.",
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("savings_entries")
+    .insert({
+      user_id: userId,
+      goal_id: goalId,
+      type,
+      amount,
+      entry_date: entryDate,
+      note,
+    })
+    .select("id, goal_id, type, amount, entry_date, note, created_at")
+    .single();
+
+  if (error) {
+    return {
+      success: false,
+      message: sanitizeErrorMessage(error.message, "Could not save savings entry."),
+    };
+  }
+
+  const entry = toSavingsEntryRecord(
+    { ...data, type: data.type as SavingsEntryType },
+    goalResult.goal.name
+  );
+  const nextSavedAmount =
+    goalResult.goal.savedAmount + getSavingsEntrySignedAmount(entry);
+
+  revalidatePath("/dashboard");
+
+  return {
+    success: true,
+    entry,
+    goal: {
+      ...goalResult.goal,
+      savedAmount: nextSavedAmount,
+      remainingAmount: Math.max(0, goalResult.goal.targetAmount - nextSavedAmount),
+    },
+  };
 }
