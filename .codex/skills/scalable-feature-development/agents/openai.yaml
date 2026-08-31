@@ -1,0 +1,7 @@
+interface:
+  display_name: "Scalable Feature Development"
+  short_description: "Design features for maintainable growth"
+  default_prompt: "Use $scalable-feature-development to plan and build this feature for maintainable growth."
+
+policy:
+  allow_implicit_invocation: true

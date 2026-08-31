@@ -1,0 +1,7 @@
+interface:
+  display_name: "Branch Before Editing"
+  short_description: "Create a safe task branch before edits"
+  default_prompt: "Use $branch-before-editing before modifying repository files for this task."
+
+policy:
+  allow_implicit_invocation: true
