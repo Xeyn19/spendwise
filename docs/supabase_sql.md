@@ -15,8 +15,10 @@ Run the sections in this order if you want to execute them step by step:
 5. Create the RLS policies
 6. Create the domain tables and policies in sections 7 through 26
 7. Create the unified finance transaction view in section 27
+8. Enforce atomic savings balances in section 28
 
-If you prefer, you can skip to the final section and run the **full combined SQL block** in one shot.
+The profile, income, budget, and expense sections also contain scoped combined
+blocks for convenient setup of those domains.
 
 ## 1. Create the `profiles` Table
 
@@ -964,4 +966,80 @@ join public.savings_goals
 
 revoke all on table public.finance_transactions from public, anon;
 grant select on table public.finance_transactions to authenticated;
+```
+
+## 28. Enforce Atomic Savings Balances
+
+Apply this section to Supabase **before deploying the application changes that
+depend on it**. The application keeps its pre-insert balance check for quick
+feedback, but this trigger is authoritative when withdrawals arrive
+concurrently or are inserted through another API client.
+
+The trigger locks the owning goal row before recalculating the current balance.
+That makes inserts for one goal execute serially, so two withdrawals cannot both
+spend the same balance. A rejected withdrawal uses PostgreSQL check-violation
+code `23514`, which the application maps to its existing safe withdrawal
+message.
+
+This block is idempotent and can be rerun safely.
+
+```sql
+create or replace function public.enforce_savings_entry_balance()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  current_balance numeric(12, 2);
+  resulting_balance numeric(12, 2);
+begin
+  perform 1
+  from public.savings_goals
+  where id = new.goal_id
+    and user_id = new.user_id
+  for update;
+
+  if not found then
+    raise exception using
+      errcode = '23503',
+      message = 'Savings goal does not belong to this user.';
+  end if;
+
+  select coalesce(
+    sum(
+      case
+        when type = 'withdrawal' then -amount
+        else amount
+      end
+    ),
+    0
+  )
+  into current_balance
+  from public.savings_entries
+  where goal_id = new.goal_id
+    and user_id = new.user_id;
+
+  resulting_balance := current_balance + case
+    when new.type = 'withdrawal' then -new.amount
+    else new.amount
+  end;
+
+  if resulting_balance < 0 then
+    raise exception using
+      errcode = '23514',
+      constraint = 'savings_entries_balance_nonnegative',
+      message = 'Savings balance cannot be negative.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists enforce_savings_entry_balance_before_insert
+  on public.savings_entries;
+
+create trigger enforce_savings_entry_balance_before_insert
+before insert on public.savings_entries
+for each row
+execute function public.enforce_savings_entry_balance();
 ```

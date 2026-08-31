@@ -1,6 +1,6 @@
 import "server-only";
 
-import { sanitizeErrorMessage } from "@/lib/error-message";
+import { reportPublicError } from "@/lib/error-message";
 import type { ExpenseRecord } from "@/lib/expense-shared";
 import { createClient } from "@/lib/supabase/server";
 
@@ -42,7 +42,7 @@ export async function listUserExpenses() {
 
   if (error) {
     throw new Error(
-      sanitizeErrorMessage(error.message, "Could not load expenses.")
+      reportPublicError("Could not load expenses.", error, "Could not load expenses.")
     );
   }
 

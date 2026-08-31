@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import type { AuthActionState } from "@/app/(auth)/auth-action-state";
+import { validateRegistrationFormData } from "@/lib/auth-validation";
 import { createClient } from "@/lib/supabase/server";
 
 function getBaseUrl(headerStore: Awaited<ReturnType<typeof headers>>) {
@@ -24,8 +25,16 @@ function getBaseUrl(headerStore: Awaited<ReturnType<typeof headers>>) {
   return "http://localhost:3000";
 }
 
-function mapAuthError(message: string) {
-  const normalizedMessage = message.toLowerCase();
+function mapAuthError(error: unknown) {
+  console.error("Supabase authentication request failed.", error);
+
+  const normalizedMessage =
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+      ? error.message.toLowerCase()
+      : "";
 
   if (normalizedMessage.includes("rate limit")) {
     return "Supabase is temporarily rate-limiting signup emails. Wait a few minutes, then try again.";
@@ -43,17 +52,24 @@ function mapAuthError(message: string) {
     return "An account with this email already exists.";
   }
 
-  return message;
+  return "Authentication failed. Check your details and try again.";
 }
 
 export async function registerAction(
   _previousState: AuthActionState,
   formData: FormData
 ): Promise<AuthActionState> {
-  const email = String(formData.get("email") ?? "").trim();
-  const password = String(formData.get("password") ?? "");
-  const firstName = String(formData.get("firstName") ?? "").trim();
-  const lastName = String(formData.get("lastName") ?? "").trim();
+  const validation = validateRegistrationFormData(formData);
+
+  if (!validation.success) {
+    return {
+      success: false,
+      message: "Fix the highlighted registration fields and try again.",
+      fieldErrors: validation.fieldErrors,
+    };
+  }
+
+  const { email, password, firstName, lastName } = validation.data;
 
   let signUpResult: Awaited<ReturnType<Awaited<ReturnType<typeof createClient>>["auth"]["signUp"]>>;
 
@@ -72,7 +88,8 @@ export async function registerAction(
         },
       },
     });
-  } catch {
+  } catch (error) {
+    console.error("Supabase signup request could not be completed.", error);
     return {
       success: false,
       message:
@@ -85,7 +102,7 @@ export async function registerAction(
   if (error) {
     return {
       success: false,
-      message: mapAuthError(error.message),
+      message: mapAuthError(error),
     };
   }
 
@@ -118,7 +135,7 @@ export async function loginAction(
   if (error) {
     return {
       success: false,
-      message: mapAuthError(error.message),
+      message: mapAuthError(error),
     };
   }
 
