@@ -14,15 +14,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-type Errors = {
-  firstName?: string;
-  lastName?: string;
-  email?: string;
-  password?: string;
-  confirmPassword?: string;
-  terms?: string;
-};
+import type { RegistrationFieldErrors } from "@/lib/auth-validation";
+import { validateRegistrationFormData } from "@/lib/auth-validation";
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -37,9 +30,10 @@ function SubmitButton() {
 export function RegisterForm() {
   const [showPassword, setShowPassword] = React.useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
-  const [errors, setErrors] = React.useState<Errors>({});
+  const [clientErrors, setClientErrors] = React.useState<RegistrationFieldErrors>({});
   const [state, formAction] = useActionState(registerAction, initialAuthActionState);
   const lastToastKeyRef = React.useRef<string | null>(null);
+  const errors = { ...state.fieldErrors, ...clientErrors };
 
   React.useEffect(() => {
     if (!state.message) {
@@ -64,36 +58,11 @@ export function RegisterForm() {
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     const formData = new FormData(event.currentTarget);
-    const firstName = String(formData.get("firstName") ?? "").trim();
-    const lastName = String(formData.get("lastName") ?? "").trim();
-    const email = String(formData.get("email") ?? "").trim();
-    const password = String(formData.get("password") ?? "");
-    const confirmPassword = String(formData.get("confirmPassword") ?? "");
-    const terms = formData.get("terms");
-    const nextErrors: Errors = {};
+    const validation = validateRegistrationFormData(formData);
 
-    if (!firstName) nextErrors.firstName = "Enter your first name.";
-    if (!lastName) nextErrors.lastName = "Enter your last name.";
-    if (!email) {
-      nextErrors.email = "Enter your email address.";
-    } else if (!/^\S+@\S+\.\S+$/.test(email)) {
-      nextErrors.email = "Enter a valid email address.";
-    }
-    if (!password) {
-      nextErrors.password = "Choose a password.";
-    } else if (password.length < 8) {
-      nextErrors.password = "Use at least 8 characters.";
-    }
-    if (!confirmPassword) {
-      nextErrors.confirmPassword = "Confirm your password.";
-    } else if (confirmPassword !== password) {
-      nextErrors.confirmPassword = "Passwords do not match.";
-    }
-    if (!terms) nextErrors.terms = "You must accept the terms to continue.";
+    setClientErrors(validation.success ? {} : validation.fieldErrors);
 
-    setErrors(nextErrors);
-
-    if (Object.keys(nextErrors).length > 0) {
+    if (!validation.success) {
       event.preventDefault();
       toast.error("Fix the highlighted registration fields and try again.");
       return;

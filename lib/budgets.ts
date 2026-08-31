@@ -1,6 +1,6 @@
 import "server-only";
 
-import { sanitizeErrorMessage } from "@/lib/error-message";
+import { reportPublicError } from "@/lib/error-message";
 import type { BudgetRecord } from "@/lib/budget-shared";
 import { createClient } from "@/lib/supabase/server";
 
@@ -44,7 +44,7 @@ export async function listUserBudgets() {
 
   if (error) {
     throw new Error(
-      sanitizeErrorMessage(error.message, "Could not load budgets.")
+      reportPublicError("Could not load budgets.", error, "Could not load budgets.")
     );
   }
 

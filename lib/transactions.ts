@@ -1,6 +1,6 @@
 import "server-only";
 
-import { sanitizeErrorMessage } from "@/lib/error-message";
+import { reportPublicError } from "@/lib/error-message";
 import type { TransactionRecord, TransactionType } from "@/lib/transactions-shared";
 import { createClient } from "@/lib/supabase/server";
 
@@ -56,7 +56,11 @@ export async function listUserTransactions(limit = DEFAULT_TRANSACTION_LIMIT) {
 
   if (error) {
     throw new Error(
-      sanitizeErrorMessage(error.message, "Could not load transactions.")
+      reportPublicError(
+        "Could not load transactions.",
+        error,
+        "Could not load transactions."
+      )
     );
   }
 

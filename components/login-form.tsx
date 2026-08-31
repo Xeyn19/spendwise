@@ -62,6 +62,7 @@ export function LoginForm({ logoutSuccess = false }: { logoutSuccess?: boolean }
   const [state, formAction] = useActionState(loginAction, initialAuthActionState);
   const lastToastKeyRef = React.useRef<string | null>(null);
   const logoutToastShownRef = React.useRef(false);
+  const confirmationToastShownRef = React.useRef(false);
 
   React.useEffect(() => {
     if (!logoutSuccess && searchParams.get("logout") !== "success") {
@@ -75,6 +76,19 @@ export function LoginForm({ logoutSuccess = false }: { logoutSuccess?: boolean }
     logoutToastShownRef.current = true;
     toast.success("You have been logged out successfully.");
     document.cookie = "spendwise_logout=; Max-Age=0; path=/; SameSite=Lax";
+    router.replace("/login", { scroll: false });
+  });
+
+  React.useEffect(() => {
+    if (
+      searchParams.get("confirmed") !== "success" ||
+      confirmationToastShownRef.current
+    ) {
+      return;
+    }
+
+    confirmationToastShownRef.current = true;
+    toast.success("Email confirmed. Sign in to continue.");
     router.replace("/login", { scroll: false });
   });
 

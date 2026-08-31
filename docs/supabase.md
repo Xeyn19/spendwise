@@ -126,7 +126,7 @@ Expected flow:
 2. Supabase sends confirmation email
 3. user opens the confirmation link
 4. the app verifies the token
-5. the user can continue to the dashboard
+5. the user signs in normally
 
 ## 5.3 Configure the confirm-signup email template
 
@@ -150,7 +150,9 @@ Why this matters:
 
 - the app shows a dedicated confirmation page
 - the app posts to `/auth/confirm/verify`
-- the app then stores session cookies correctly through the SSR flow
+- OTP verification uses a non-persisting server-only client
+- confirmation does not create or replace browser session cookies
+- the user is sent to the login page after confirmation
 
 ## 5.4 Configure Site URL and Redirect URLs
 
@@ -194,6 +196,7 @@ Run the SQL from [docs/supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql
 7. savings goals
 8. savings entries
 9. unified finance transaction view
+10. atomic savings-balance trigger
 
 Recommended section checkpoints:
 
@@ -203,6 +206,11 @@ Recommended section checkpoints:
 - expense schema: sections `17` to `21`
 - savings schema: sections `22` to `26`
 - unified transaction view: section `27`
+- atomic savings integrity: section `28`
+
+Section `28` must be applied to Supabase before deploying the matching
+application release. The action-level withdrawal check improves feedback, but
+the database trigger is the authoritative concurrency guard.
 
 ## 7. Runtime Supabase Integration
 
@@ -249,6 +257,17 @@ Purpose:
 - refresh auth claims
 - synchronize Supabase cookies with the Next.js response
 
+## 7.4 Stateless confirmation client
+
+File:
+
+- [lib/supabase/stateless.ts](/E:/my-codes/spendwise/lib/supabase/stateless.ts:1)
+
+Purpose:
+
+- verify signup OTP tokens without persisting, refreshing, or detecting a session
+- prevent confirmation from creating or replacing browser auth cookies
+
 ## 8. Auth Flow in This App
 
 ## 8.1 Registration
@@ -266,7 +285,10 @@ File:
   - `first_name`
   - `last_name`
 
-If signup returns an immediate session, the app redirects directly to `/dashboard`. Otherwise it tells the user to confirm email first.
+The shared registration validator normalizes names and email, enforces field
+lengths and password confirmation, and requires terms acceptance on both the
+client and server. If signup returns an immediate session, the app redirects
+directly to `/dashboard`. Otherwise it tells the user to confirm email first.
 
 ## 8.2 Login
 
@@ -288,6 +310,8 @@ The verification route:
 - validates the request shape
 - calls `supabase.auth.verifyOtp`
 - returns a structured success/error response
+- does not persist the verified session
+- directs the user to `/login?confirmed=success` to sign in normally
 
 ## 9. Finance Data Access in This App
 
@@ -390,6 +414,9 @@ After configuration, confirm all of the following:
 - create/delete savings goal works
 - create savings contribution works
 - create savings withdrawal works
+- confirmation succeeds without creating an authenticated browser session
+- two concurrent withdrawals that only one balance can cover result in exactly one success
+- the final savings balance remains non-negative
 
 ## 13. Troubleshooting
 

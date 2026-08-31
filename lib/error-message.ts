@@ -1,17 +1,38 @@
-export function sanitizeErrorMessage(
-  message: string | null | undefined,
-  fallback = "Something went wrong."
-) {
-  if (!message) {
-    return fallback;
+export type PublicErrorMessagesByCode = Readonly<Record<string, string>>;
+
+function getErrorCode(error: unknown) {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+  ) {
+    return error.code;
   }
 
-  const withoutScripts = message.replace(
-    /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-    " "
-  );
-  const withoutTags = withoutScripts.replace(/<[^>]+>/g, " ");
-  const normalized = withoutTags.replace(/\s+/g, " ").trim();
+  return null;
+}
 
-  return normalized || fallback;
+export function getPublicErrorMessage(
+  error: unknown,
+  fallback: string,
+  messagesByCode: PublicErrorMessagesByCode = {}
+) {
+  const code = getErrorCode(error);
+
+  if (code && messagesByCode[code]) {
+    return messagesByCode[code];
+  }
+
+  return fallback;
+}
+
+export function reportPublicError(
+  context: string,
+  error: unknown,
+  fallback: string,
+  messagesByCode: PublicErrorMessagesByCode = {}
+) {
+  console.error(context, error);
+  return getPublicErrorMessage(error, fallback, messagesByCode);
 }

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { sanitizeErrorMessage } from "@/lib/error-message";
+import { reportPublicError } from "@/lib/error-message";
 import type { SavingsEntryRecord, SavingsEntryType, SavingsGoalRecord } from "@/lib/savings-shared";
 import { getSavingsEntrySignedAmount } from "@/lib/savings-shared";
 import { createClient } from "@/lib/supabase/server";
@@ -55,7 +55,11 @@ export async function listUserSavings() {
 
   if (goalsError) {
     throw new Error(
-      sanitizeErrorMessage(goalsError.message, "Could not load savings goals.")
+      reportPublicError(
+        "Could not load savings goals.",
+        goalsError,
+        "Could not load savings goals."
+      )
     );
   }
 
@@ -68,7 +72,11 @@ export async function listUserSavings() {
 
   if (entriesError) {
     throw new Error(
-      sanitizeErrorMessage(entriesError.message, "Could not load savings entries.")
+      reportPublicError(
+        "Could not load savings entries.",
+        entriesError,
+        "Could not load savings entries."
+      )
     );
   }
 

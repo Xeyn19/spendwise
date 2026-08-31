@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import type { BudgetRecord } from "@/lib/budget-shared";
-import { sanitizeErrorMessage } from "@/lib/error-message";
+import { reportPublicError } from "@/lib/error-message";
 import type { ExpenseRecord } from "@/lib/expense-shared";
 import { normalizeCategoryKey } from "@/lib/expense-shared";
 import type { IncomeRecord } from "@/lib/income-shared";
@@ -48,6 +48,14 @@ type SavingsEntryActionResult = {
   entry?: SavingsEntryRecord;
   deletedId?: string;
 };
+
+const BUDGET_ERROR_MESSAGES = {
+  "23P01": "A budget for this category already overlaps the selected date range.",
+} as const;
+
+const SAVINGS_ENTRY_ERROR_MESSAGES = {
+  "23514": "Withdrawal cannot be greater than the current saved amount.",
+} as const;
 
 function parseAmount(value: string) {
   const amount = Number(value);
@@ -119,7 +127,7 @@ async function getSavingsGoalWithSavedAmount({
 
   if (goalError) {
     return {
-      error: sanitizeErrorMessage(goalError.message, "Could not load savings goal."),
+      error: reportPublicError("load savings goal", goalError, "Could not load savings goal."),
     };
   }
 
@@ -135,7 +143,7 @@ async function getSavingsGoalWithSavedAmount({
 
   if (entriesError) {
     return {
-      error: sanitizeErrorMessage(entriesError.message, "Could not load savings entries."),
+      error: reportPublicError("load savings entries", entriesError, "Could not load savings entries."),
     };
   }
 
@@ -208,7 +216,7 @@ async function validateBudgetInput({
     await sameCategoryQuery;
 
   if (overlapError) {
-    return sanitizeErrorMessage(overlapError.message, "Could not validate budget overlap.");
+    return reportPublicError("validate budget overlap", overlapError, "Could not validate budget overlap.");
   }
 
   if ((sameCategoryOverlaps ?? []).length > 0) {
@@ -230,7 +238,7 @@ async function validateBudgetInput({
     await overlappingBudgetsQuery;
 
   if (budgetError) {
-    return sanitizeErrorMessage(budgetError.message, "Could not validate budget allocation.");
+    return reportPublicError("validate budget allocation", budgetError, "Could not validate budget allocation.");
   }
 
   const { data: incomes, error: incomeError } = await supabase
@@ -241,7 +249,7 @@ async function validateBudgetInput({
     .lte("received_on", periodEnd);
 
   if (incomeError) {
-    return sanitizeErrorMessage(incomeError.message, "Could not validate budget against income.");
+    return reportPublicError("validate budget against income", incomeError, "Could not validate budget against income.");
   }
 
   const overlappingBudgetTotal = (overlappingBudgets ?? []).reduce(
@@ -278,8 +286,9 @@ async function validateIncomeDeletion({
     .gte("period_end", receivedOn);
 
   if (affectedBudgetsError) {
-    return sanitizeErrorMessage(
-      affectedBudgetsError.message,
+    return reportPublicError(
+      "validate income deletion against affected budgets",
+      affectedBudgetsError,
       "Could not validate income deletion."
     );
   }
@@ -293,8 +302,9 @@ async function validateIncomeDeletion({
       .gte("period_end", budget.period_start);
 
     if (budgetError) {
-      return sanitizeErrorMessage(
-        budgetError.message,
+      return reportPublicError(
+        "validate income deletion budget totals",
+        budgetError,
         "Could not validate income deletion."
       );
     }
@@ -307,8 +317,9 @@ async function validateIncomeDeletion({
       .lte("received_on", budget.period_end);
 
     if (incomeError) {
-      return sanitizeErrorMessage(
-        incomeError.message,
+      return reportPublicError(
+        "validate income deletion income totals",
+        incomeError,
         "Could not validate income deletion."
       );
     }
@@ -372,7 +383,7 @@ export async function createIncomeAction(formData: FormData): Promise<IncomeActi
   if (error) {
     return {
       success: false,
-      message: sanitizeErrorMessage(error.message, "Could not save income."),
+      message: reportPublicError("save income", error, "Could not save income."),
     };
   }
 
@@ -410,8 +421,9 @@ export async function deleteIncomeAction(incomeId: string): Promise<IncomeAction
   if (incomeLookupError) {
     return {
       success: false,
-      message: sanitizeErrorMessage(
-        incomeLookupError.message,
+      message: reportPublicError(
+        "load income before deletion",
+        incomeLookupError,
         "Could not load income."
       ),
     };
@@ -440,7 +452,7 @@ export async function deleteIncomeAction(incomeId: string): Promise<IncomeAction
   if (error) {
     return {
       success: false,
-      message: sanitizeErrorMessage(error.message, "Could not delete income."),
+      message: reportPublicError("delete income", error, "Could not delete income."),
     };
   }
 
@@ -491,7 +503,7 @@ export async function createExpenseAction(formData: FormData): Promise<ExpenseAc
   if (error) {
     return {
       success: false,
-      message: sanitizeErrorMessage(error.message, "Could not save expense."),
+      message: reportPublicError("save expense", error, "Could not save expense."),
     };
   }
 
@@ -528,7 +540,7 @@ export async function deleteExpenseAction(expenseId: string): Promise<ExpenseAct
   if (error) {
     return {
       success: false,
-      message: sanitizeErrorMessage(error.message, "Could not delete expense."),
+      message: reportPublicError("delete expense", error, "Could not delete expense."),
     };
   }
 
@@ -605,7 +617,7 @@ export async function createBudgetAction(formData: FormData): Promise<BudgetActi
   if (error) {
     return {
       success: false,
-      message: sanitizeErrorMessage(error.message, "Could not save budget."),
+      message: reportPublicError("save budget", error, "Could not save budget.", BUDGET_ERROR_MESSAGES),
     };
   }
 
@@ -690,7 +702,7 @@ export async function updateBudgetAction(
   if (error) {
     return {
       success: false,
-      message: sanitizeErrorMessage(error.message, "Could not update budget."),
+      message: reportPublicError("update budget", error, "Could not update budget.", BUDGET_ERROR_MESSAGES),
     };
   }
 
@@ -720,7 +732,7 @@ export async function deleteBudgetAction(budgetId: string): Promise<BudgetAction
   if (error) {
     return {
       success: false,
-      message: sanitizeErrorMessage(error.message, "Could not delete budget."),
+      message: reportPublicError("delete budget", error, "Could not delete budget."),
     };
   }
 
@@ -776,7 +788,7 @@ export async function createSavingsGoalAction(
   if (goalError) {
     return {
       success: false,
-      message: sanitizeErrorMessage(goalError.message, "Could not save savings goal."),
+      message: reportPublicError("save savings goal", goalError, "Could not save savings goal."),
     };
   }
 
@@ -805,7 +817,7 @@ export async function createSavingsGoalAction(
 
       return {
         success: false,
-        message: sanitizeErrorMessage(entryError.message, "Could not save initial savings."),
+        message: reportPublicError("save initial savings", entryError, "Could not save initial savings."),
       };
     }
 
@@ -844,7 +856,7 @@ export async function deleteSavingsGoalAction(
   if (error) {
     return {
       success: false,
-      message: sanitizeErrorMessage(error.message, "Could not delete savings goal."),
+      message: reportPublicError("delete savings goal", error, "Could not delete savings goal."),
     };
   }
 
@@ -915,7 +927,12 @@ export async function createSavingsEntryAction(
   if (error) {
     return {
       success: false,
-      message: sanitizeErrorMessage(error.message, "Could not save savings entry."),
+      message: reportPublicError(
+        "save savings entry",
+        error,
+        "Could not save savings entry.",
+        SAVINGS_ENTRY_ERROR_MESSAGES
+      ),
     };
   }
 

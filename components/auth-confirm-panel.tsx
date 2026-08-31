@@ -115,8 +115,8 @@ export function AuthConfirmPanel({ tokenHash, type }: AuthConfirmPanelProps) {
 
         {isSuccess ? (
           <Button asChild className="w-full rounded-2xl">
-            <Link href="/dashboard">
-              Continue to dashboard
+            <Link href="/login?confirmed=success">
+              Continue to sign in
               <ArrowRight className="size-4" />
             </Link>
           </Button>

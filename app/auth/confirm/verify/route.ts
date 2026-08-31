@@ -1,7 +1,8 @@
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
+import { reportPublicError } from "@/lib/error-message";
+import { createStatelessAuthClient } from "@/lib/supabase/stateless";
 
 const validOtpTypes = new Set<EmailOtpType>([
   "signup",
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const supabase = await createClient();
+  const supabase = createStatelessAuthClient();
   const { error } = await supabase.auth.verifyOtp({
     type: type as EmailOtpType,
     token_hash: tokenHash,
@@ -37,8 +38,11 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: false,
-        message:
-          "This confirmation link is invalid, expired, or was already used.",
+        message: reportPublicError(
+          "verify email confirmation OTP",
+          error,
+          "This confirmation link is invalid, expired, or was already used."
+        ),
       },
       { status: 400 }
     );
@@ -46,6 +50,6 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     success: true,
-    message: "Your email is confirmed. You can continue to your dashboard.",
+    message: "Your email is confirmed. Sign in to continue to your dashboard.",
   });
 }

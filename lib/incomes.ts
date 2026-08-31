@@ -1,6 +1,6 @@
 import "server-only";
 
-import { sanitizeErrorMessage } from "@/lib/error-message";
+import { reportPublicError } from "@/lib/error-message";
 import type { IncomeRecord } from "@/lib/income-shared";
 import { createClient } from "@/lib/supabase/server";
 
@@ -42,7 +42,7 @@ export async function listUserIncomes() {
 
   if (error) {
     throw new Error(
-      sanitizeErrorMessage(error.message, "Could not load incomes.")
+      reportPublicError("Could not load incomes.", error, "Could not load incomes.")
     );
   }
 
