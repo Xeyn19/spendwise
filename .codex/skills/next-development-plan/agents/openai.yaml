@@ -1,0 +1,7 @@
+interface:
+  display_name: "Next Development Plan"
+  short_description: "Choose and plan the next SpendWise feature"
+  default_prompt: "Use $next-development-plan to choose and plan the next SpendWise feature."
+
+policy:
+  allow_implicit_invocation: false
