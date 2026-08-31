@@ -1,0 +1,7 @@
+interface:
+  display_name: "Sync Public Docs"
+  short_description: "Synchronize safe public project documentation"
+  default_prompt: "Use $sync-public-docs to synchronize all public SpendWise documentation with the current project."
+
+policy:
+  allow_implicit_invocation: false
