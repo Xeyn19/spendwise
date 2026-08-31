@@ -1,3 +1,5 @@
+import type { TransactionRecord } from "@/lib/transactions-shared";
+
 export type ExpenseRecord = {
   id: string;
   category: string;
@@ -7,13 +9,8 @@ export type ExpenseRecord = {
   createdAt: string;
 };
 
-export type ExpenseTransaction = {
-  id: string;
-  date: string;
+export type ExpenseTransaction = TransactionRecord & {
   type: "Expense";
-  category: string;
-  amount: number;
-  note: string;
 };
 
 export function normalizeCategoryKey(value: string) {

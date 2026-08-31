@@ -28,12 +28,12 @@ SpendWise is a Next.js 16 personal finance application with:
 - backend-computed analytics used by the dashboard
 - backend-computed monthly reports used by the dashboard
 - PDF export for the selected monthly report
+- unified server transaction feed across income, expenses, and savings entries
 - budget-to-income validation
 - expense-to-budget derived matching
 
 ### Not fully completed yet
 
-- fully unified transactions data source
 - separate route-level dashboard pages
 
 ## Tech Stack
@@ -69,6 +69,7 @@ Important files:
 - [app/dashboard/page.tsx](/E:/my-codes/spendwise/app/dashboard/page.tsx:1)
 - [app/dashboard/actions.ts](/E:/my-codes/spendwise/app/dashboard/actions.ts:1)
 - [components/spendwise-dashboard.tsx](/E:/my-codes/spendwise/components/spendwise-dashboard.tsx:1)
+- [lib/transactions.ts](/E:/my-codes/spendwise/lib/transactions.ts:1)
 - [app/(auth)/actions.ts](/E:/my-codes/spendwise/app/(auth)/actions.ts:1)
 - [lib/supabase/server.ts](/E:/my-codes/spendwise/lib/supabase/server.ts:1)
 - [docs/PROJECT_ARCHITECTURE.md](/E:/my-codes/spendwise/docs/PROJECT_ARCHITECTURE.md:1)
@@ -195,6 +196,7 @@ These are currently client-side sections inside one dashboard page, not separate
 | Expenses | Persisted |
 | Savings goals | Persisted |
 | Savings entries | Persisted |
+| Recent transactions | Unified server view over persisted finance rows |
 | Analytics | Backend-computed from persisted rows |
 | Reports | Backend-computed from persisted rows |
 
@@ -247,6 +249,5 @@ For Vercel deployment:
 
 ## Next Recommended Work
 
-1. Unify transactions on the server
-2. Add edit/delete support for individual savings entries
-3. Split dashboard subviews into route-level pages if needed
+1. Add edit/delete support for individual savings entries
+2. Split dashboard subviews into route-level pages if needed

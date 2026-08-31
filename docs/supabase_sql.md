@@ -13,6 +13,8 @@ Run the sections in this order if you want to execute them step by step:
 3. Create the automatic profile-insert trigger
 4. Enable Row Level Security
 5. Create the RLS policies
+6. Create the domain tables and policies in sections 7 through 26
+7. Create the unified finance transaction view in section 27
 
 If you prefer, you can skip to the final section and run the **full combined SQL block** in one shot.
 
@@ -899,4 +901,67 @@ using (
       and savings_goals.user_id = (select auth.uid())
   )
 );
+```
+
+## 27. Create the Unified Finance Transaction View
+
+This read-only view normalizes income, expense, and savings entry rows for the
+recent transaction feed. `security_invoker = true` makes queries use the
+caller's permissions and the RLS policies on the underlying tables.
+
+```sql
+create or replace view public.finance_transactions
+with (security_invoker = true)
+as
+select
+  'income-' || incomes.id::text as id,
+  incomes.user_id,
+  incomes.received_on as occurred_on,
+  incomes.created_at,
+  'Income'::text as transaction_type,
+  incomes.source as category,
+  incomes.amount,
+  incomes.note
+from public.incomes
+
+union all
+
+select
+  'expense-' || expenses.id::text as id,
+  expenses.user_id,
+  expenses.spent_on as occurred_on,
+  expenses.created_at,
+  'Expense'::text as transaction_type,
+  expenses.category,
+  expenses.amount,
+  expenses.note
+from public.expenses
+
+union all
+
+select
+  'savings-' || savings_entries.id::text as id,
+  savings_entries.user_id,
+  savings_entries.entry_date as occurred_on,
+  savings_entries.created_at,
+  'Savings'::text as transaction_type,
+  savings_goals.name as category,
+  case
+    when savings_entries.type = 'withdrawal' then -savings_entries.amount
+    else savings_entries.amount
+  end as amount,
+  coalesce(
+    nullif(savings_entries.note, ''),
+    case
+      when savings_entries.type = 'withdrawal' then 'Savings withdrawal'
+      else 'Savings contribution'
+    end
+  ) as note
+from public.savings_entries
+join public.savings_goals
+  on savings_goals.id = savings_entries.goal_id
+  and savings_goals.user_id = savings_entries.user_id;
+
+revoke all on table public.finance_transactions from public, anon;
+grant select on table public.finance_transactions to authenticated;
 ```

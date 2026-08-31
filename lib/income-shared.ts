@@ -1,3 +1,5 @@
+import type { TransactionRecord } from "@/lib/transactions-shared";
+
 export type IncomeRecord = {
   id: string;
   source: string;
@@ -7,13 +9,8 @@ export type IncomeRecord = {
   createdAt: string;
 };
 
-export type IncomeTransaction = {
-  id: string;
-  date: string;
+export type IncomeTransaction = TransactionRecord & {
   type: "Income";
-  category: string;
-  amount: number;
-  note: string;
 };
 
 export function toIncomeTransaction(income: IncomeRecord): IncomeTransaction {
