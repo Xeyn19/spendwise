@@ -5,14 +5,25 @@ import { emptyAnalyticsData } from "@/lib/analytics-shared";
 import { listUserAnalytics } from "@/lib/analytics";
 import { listUserBudgets } from "@/lib/budgets";
 import { listUserExpenses } from "@/lib/expenses";
-import { toExpenseTransaction } from "@/lib/expense-shared";
-import { toIncomeTransaction } from "@/lib/income-shared";
 import { listUserIncomes } from "@/lib/incomes";
 import { listUserReports } from "@/lib/reports";
 import { emptyReportData } from "@/lib/reports-shared";
 import { listUserSavings } from "@/lib/savings";
-import { toSavingsTransaction } from "@/lib/savings-shared";
 import { createClient } from "@/lib/supabase/server";
+import { listUserTransactions } from "@/lib/transactions";
+
+async function loadDashboardData<T>(
+  loader: () => Promise<T>,
+  fallback: T,
+  errorMessage: string
+) {
+  try {
+    return await loader();
+  } catch (error) {
+    console.error(errorMessage, error);
+    return fallback;
+  }
+}
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -35,59 +46,32 @@ export default async function DashboardPage() {
   const email =
     profile?.email ??
     (typeof claims.email === "string" ? claims.email : "No email available");
-  let incomes: Awaited<ReturnType<typeof listUserIncomes>> = [];
-  let budgets: Awaited<ReturnType<typeof listUserBudgets>> = [];
-  let expenses: Awaited<ReturnType<typeof listUserExpenses>> = [];
-  let savings: Awaited<ReturnType<typeof listUserSavings>> = {
-    goals: [],
-    entries: [],
-  };
-  let analytics: Awaited<ReturnType<typeof listUserAnalytics>> = emptyAnalyticsData;
-  let reports: Awaited<ReturnType<typeof listUserReports>> = emptyReportData;
-
-  try {
-    incomes = await listUserIncomes();
-  } catch (error) {
-    console.error("Could not load incomes for dashboard.", error);
-  }
-
-  try {
-    budgets = await listUserBudgets();
-  } catch (error) {
-    console.error("Could not load budgets for dashboard.", error);
-  }
-
-  try {
-    expenses = await listUserExpenses();
-  } catch (error) {
-    console.error("Could not load expenses for dashboard.", error);
-  }
-
-  try {
-    savings = await listUserSavings();
-  } catch (error) {
-    console.error("Could not load savings for dashboard.", error);
-  }
-
-  try {
-    analytics = await listUserAnalytics();
-  } catch (error) {
-    console.error("Could not load analytics for dashboard.", error);
-  }
-
-  try {
-    reports = await listUserReports();
-  } catch (error) {
-    console.error("Could not load reports for dashboard.", error);
-  }
-
-  const recentTransactions = [
-    ...incomes.map(toIncomeTransaction),
-    ...expenses.map(toExpenseTransaction),
-    ...savings.entries.map(toSavingsTransaction),
-  ]
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 10);
+  const [incomes, budgets, expenses, savings, recentTransactions, analytics, reports] =
+    await Promise.all([
+      loadDashboardData(listUserIncomes, [], "Could not load incomes for dashboard."),
+      loadDashboardData(listUserBudgets, [], "Could not load budgets for dashboard."),
+      loadDashboardData(listUserExpenses, [], "Could not load expenses for dashboard."),
+      loadDashboardData(
+        listUserSavings,
+        { goals: [], entries: [] },
+        "Could not load savings for dashboard."
+      ),
+      loadDashboardData(
+        listUserTransactions,
+        [],
+        "Could not load transactions for dashboard."
+      ),
+      loadDashboardData(
+        listUserAnalytics,
+        emptyAnalyticsData,
+        "Could not load analytics for dashboard."
+      ),
+      loadDashboardData(
+        listUserReports,
+        emptyReportData,
+        "Could not load reports for dashboard."
+      ),
+    ]);
   const todayIso = new Date().toISOString().slice(0, 10);
 
   return (

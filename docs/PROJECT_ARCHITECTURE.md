@@ -23,9 +23,10 @@ The current architecture is intentionally hybrid:
 - **implemented as derived views**
   - dashboard summaries
   - budget progress
-  - recent transactions
   - analytics cards
   - monthly report view
+- **implemented as a unified database read model**
+  - recent transactions
 
 ## 2. Stack
 
@@ -358,7 +359,23 @@ Security:
 - RLS enabled
 - users can manage only entries attached to their own goals
 
-## 7.2 Shared database functions and triggers
+## 7.2 Unified transaction read model
+
+### `public.finance_transactions`
+
+Purpose:
+
+- exposes one read-only transaction timeline across incomes, expenses, and savings entries
+- preserves the separate domain tables as the write sources of truth
+- normalizes identifiers, dates, categories, notes, and signed savings amounts
+
+Security:
+
+- defined with `security_invoker = true`
+- underlying table RLS policies continue to enforce user ownership
+- selectable only by the `authenticated` role
+
+## 7.3 Shared database functions and triggers
 
 ### `public.set_updated_at()`
 
@@ -381,7 +398,7 @@ Purpose:
 
 - automatically inserts a matching profile after a new auth user is created
 
-## 7.3 Indexing
+## 7.4 Indexing
 
 | Object | Type | Reason |
 | --- | --- | --- |
@@ -463,7 +480,7 @@ When deleting income:
 | Expenses | `public.expenses` |
 | Savings goals | `public.savings_goals` |
 | Savings entries | `public.savings_entries` |
-| Recent transactions | Derived from incomes + expenses + savings entries |
+| Recent transactions | `public.finance_transactions` view |
 | Analytics | Live backend computation from persisted finance tables |
 | Reports | Live backend computation from persisted finance tables |
 
@@ -478,7 +495,7 @@ When deleting income:
 5. Budgets are loaded through `listUserBudgets()`
 6. Expenses are loaded through `listUserExpenses()`
 7. Savings goals and entries are loaded through `listUserSavings()`
-8. Recent transactions are derived server-side from incomes, expenses, and savings entries
+8. Recent transactions are loaded through `listUserTransactions()` from the unified view
 9. Analytics are computed server-side from persisted finance rows
 10. Reports are computed server-side from persisted finance rows
 11. Data is passed into `SpendWiseDashboard`
@@ -492,6 +509,7 @@ Files:
 - [lib/budgets.ts](/E:/my-codes/spendwise/lib/budgets.ts:1)
 - [lib/expenses.ts](/E:/my-codes/spendwise/lib/expenses.ts:1)
 - [lib/savings.ts](/E:/my-codes/spendwise/lib/savings.ts:1)
+- [lib/transactions.ts](/E:/my-codes/spendwise/lib/transactions.ts:1)
 - [lib/analytics.ts](/E:/my-codes/spendwise/lib/analytics.ts:1)
 - [lib/reports.ts](/E:/my-codes/spendwise/lib/reports.ts:1)
 
@@ -560,7 +578,9 @@ This component is responsible for:
 The dashboard derives:
 
 - budget spent and remaining values
-- recent transactions
+
+The dashboard initializes recent transactions from the unified server loader
+and keeps that local feed synchronized after successful client mutations.
 
 ### Backend analytics calculations
 
@@ -598,6 +618,8 @@ The dashboard is currently the application composition layer, not just a visual 
 | [lib/analytics-shared.ts](/E:/my-codes/spendwise/lib/analytics-shared.ts:1) | Shared analytics calculations and types |
 | [lib/reports.ts](/E:/my-codes/spendwise/lib/reports.ts:1) | Server reports loader |
 | [lib/reports-shared.ts](/E:/my-codes/spendwise/lib/reports-shared.ts:1) | Shared report calculations and types |
+| [lib/transactions.ts](/E:/my-codes/spendwise/lib/transactions.ts:1) | Unified server transaction loader |
+| [lib/transactions-shared.ts](/E:/my-codes/spendwise/lib/transactions-shared.ts:1) | Shared transaction DTO |
 | [app/(auth)/actions.ts](/E:/my-codes/spendwise/app/(auth)/actions.ts:1) | Register and login actions |
 | [app/(auth)/layout.tsx](/E:/my-codes/spendwise/app/(auth)/layout.tsx:1) | Redirect authenticated users away from auth pages |
 | [app/auth/confirm/page.tsx](/E:/my-codes/spendwise/app/auth/confirm/page.tsx:1) | Confirm email status page |
@@ -612,13 +634,13 @@ The app is functional, but not yet a fully persisted finance platform.
 
 Remaining gaps:
 
+- individual savings entries cannot yet be edited or deleted
 - dashboard subpages are not yet independent routes
 
 ## 15. Recommended Next Steps
 
-1. Move recent transactions to a unified server query
-2. Consider adding edit/delete support for individual savings entries
-3. Consider splitting dashboard subviews into route-level pages if complexity grows
+1. Add edit/delete support for individual savings entries
+2. Consider splitting dashboard subviews into route-level pages if complexity grows
 
 ## 16. Architecture Summary
 
@@ -626,6 +648,7 @@ SpendWise is currently best understood as:
 
 - a production-style auth and protected-app shell
 - a database-backed personal finance dashboard for incomes, budgets, expenses, and savings
+- a unified, RLS-protected transaction read model over the finance tables
 - backend-computed analytics and monthly reporting over persisted finance data
 
 The important system invariant is:

@@ -1,3 +1,5 @@
+import type { TransactionRecord } from "@/lib/transactions-shared";
+
 export type SavingsEntryType = "contribution" | "withdrawal";
 
 export type SavingsEntryRecord = {
@@ -20,13 +22,8 @@ export type SavingsGoalRecord = {
   createdAt: string;
 };
 
-export type SavingsTransaction = {
-  id: string;
-  date: string;
+export type SavingsTransaction = TransactionRecord & {
   type: "Savings";
-  category: string;
-  amount: number;
-  note: string;
 };
 
 export function getSavingsEntrySignedAmount(entry: Pick<SavingsEntryRecord, "type" | "amount">) {

@@ -50,6 +50,10 @@ The current app uses these database tables:
 - `public.savings_goals`
 - `public.savings_entries`
 
+The read-only `public.finance_transactions` view normalizes income, expense,
+and savings entry rows for the dashboard transaction feed. It uses invoker
+security so the underlying table RLS policies continue to enforce ownership.
+
 Auth identity itself lives in:
 
 - `auth.users`
@@ -189,6 +193,7 @@ Run the SQL from [docs/supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql
 6. expenses
 7. savings goals
 8. savings entries
+9. unified finance transaction view
 
 Recommended section checkpoints:
 
@@ -197,6 +202,7 @@ Recommended section checkpoints:
 - budget schema: sections `12` to `16`
 - expense schema: sections `17` to `21`
 - savings schema: sections `22` to `26`
+- unified transaction view: section `27`
 
 ## 7. Runtime Supabase Integration
 
@@ -293,6 +299,7 @@ Files:
 - [lib/budgets.ts](/E:/my-codes/spendwise/lib/budgets.ts:1)
 - [lib/expenses.ts](/E:/my-codes/spendwise/lib/expenses.ts:1)
 - [lib/savings.ts](/E:/my-codes/spendwise/lib/savings.ts:1)
+- [lib/transactions.ts](/E:/my-codes/spendwise/lib/transactions.ts:1)
 
 Each loader:
 
@@ -343,6 +350,9 @@ This is why the database keeps:
 
 and not a single mixed transaction table for v1.
 
+The `public.finance_transactions` view preserves those domain tables while
+providing one normalized, read-only query surface for transaction timelines.
+
 ## 11. Vercel Deployment Notes
 
 If deployed to Vercel, define:
@@ -373,6 +383,7 @@ After configuration, confirm all of the following:
 - dashboard loads expenses
 - dashboard loads savings goals
 - dashboard loads savings entries
+- dashboard loads the unified recent transaction feed
 - create/delete income works
 - create/update/delete budget works
 - create/delete expense works

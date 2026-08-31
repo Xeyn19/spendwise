@@ -54,14 +54,15 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import type { AnalyticsData, TrendGranularity } from "@/lib/analytics-shared";
 import { buildAnalyticsData, buildTrendData } from "@/lib/analytics-shared";
 import type { BudgetRecord } from "@/lib/budget-shared";
-import type { ExpenseRecord, ExpenseTransaction } from "@/lib/expense-shared";
+import type { ExpenseRecord } from "@/lib/expense-shared";
 import { normalizeCategoryKey, toExpenseTransaction } from "@/lib/expense-shared";
-import type { IncomeRecord, IncomeTransaction } from "@/lib/income-shared";
+import type { IncomeRecord } from "@/lib/income-shared";
 import { toIncomeTransaction } from "@/lib/income-shared";
 import type { MonthlyReport, ReportData } from "@/lib/reports-shared";
 import { buildReportData } from "@/lib/reports-shared";
-import type { SavingsEntryRecord, SavingsTransaction, SavingsGoalRecord } from "@/lib/savings-shared";
+import type { SavingsEntryRecord, SavingsGoalRecord } from "@/lib/savings-shared";
 import { toSavingsTransaction } from "@/lib/savings-shared";
+import type { TransactionRecord } from "@/lib/transactions-shared";
 
 type ActivePage =
   | "Dashboard"
@@ -94,14 +95,7 @@ type SavingsGoal = SavingsGoalRecord;
 
 type SavingsEntry = SavingsEntryRecord;
 
-type Transaction = {
-  id: string;
-  date: string;
-  type: "Income" | "Expense" | "Savings";
-  category: string;
-  amount: number;
-  note: string;
-};
+type Transaction = TransactionRecord;
 
 type ModalType = "income" | "budget" | "expense" | "savings" | "contribution" | "report" | null;
 
@@ -358,7 +352,7 @@ export function SpendWiseDashboard({
   initialExpenses: Expense[];
   initialSavingsGoals: SavingsGoal[];
   initialSavingsEntries: SavingsEntry[];
-  initialTransactions: Array<IncomeTransaction | ExpenseTransaction | SavingsTransaction>;
+  initialTransactions: TransactionRecord[];
   initialAnalyticsData: AnalyticsData;
   initialReportData: ReportData;
   todayIso: string;
