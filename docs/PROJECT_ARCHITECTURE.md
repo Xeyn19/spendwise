@@ -156,8 +156,8 @@ The model is:
 
 Session refresh and cookie synchronization are handled by:
 
-- [proxy.ts](/E:/my-codes/spendwise/proxy.ts:1)
-- [lib/supabase/proxy.ts](/E:/my-codes/spendwise/lib/supabase/proxy.ts:1)
+- [proxy.ts](../proxy.ts)
+- [lib/supabase/proxy.ts](../lib/supabase/proxy.ts)
 
 This proxy layer:
 
@@ -171,6 +171,9 @@ This proxy layer:
 - `app/(auth)/layout.tsx` redirects authenticated users away from `/login` and `/register`
 - `app/dashboard/page.tsx` redirects unauthenticated users to `/login`
 - all finance server actions verify auth claims before reading or mutating user data
+- registration is validated on the server through `lib/auth-validation.ts`
+- public errors are sanitized before they are returned to the browser
+- `next.config.ts` applies content-security, clickjacking, content-type, referrer, permissions, and production transport headers
 
 ## 6. Supabase Client Architecture
 
@@ -180,7 +183,7 @@ The app uses two primary Supabase client helpers.
 
 File:
 
-- [lib/supabase/client.ts](/E:/my-codes/spendwise/lib/supabase/client.ts:1)
+- [lib/supabase/client.ts](../lib/supabase/client.ts)
 
 Purpose:
 
@@ -190,7 +193,7 @@ Purpose:
 
 File:
 
-- [lib/supabase/server.ts](/E:/my-codes/spendwise/lib/supabase/server.ts:1)
+- [lib/supabase/server.ts](../lib/supabase/server.ts)
 
 Purpose:
 
@@ -201,7 +204,7 @@ Purpose:
 
 File:
 
-- [lib/supabase/config.ts](/E:/my-codes/spendwise/lib/supabase/config.ts:1)
+- [lib/supabase/config.ts](../lib/supabase/config.ts)
 
 Behavior:
 
@@ -398,6 +401,14 @@ Purpose:
 
 - automatically inserts a matching profile after a new auth user is created
 
+### `public.enforce_savings_entry_balance()`
+
+Purpose:
+
+- serializes entries for the same savings goal during insertion
+- rejects a withdrawal that would make the goal balance negative
+- provides the authoritative concurrency guard in addition to action-level validation
+
 ## 7.4 Indexing
 
 | Object | Type | Reason |
@@ -411,6 +422,9 @@ Purpose:
 | `expenses.id` | Primary key | Unique expense identity |
 | `idx_expenses_user_spent_on_desc` | Composite index | Fast newest-first expense listing |
 | `idx_expenses_user_category_key_spent_on` | Composite index | Fast category/date-based expense matching |
+| `idx_savings_goals_user_created_at_desc` | Composite index | Fast newest-first savings goal listing |
+| `idx_savings_entries_user_entry_date_desc` | Composite index | Fast newest-first savings entry listing |
+| `idx_savings_entries_user_goal_entry_date_desc` | Composite index | Fast per-goal balance and history queries |
 
 ## 8. Finance Domain Model
 
@@ -505,13 +519,13 @@ When deleting income:
 
 Files:
 
-- [lib/incomes.ts](/E:/my-codes/spendwise/lib/incomes.ts:1)
-- [lib/budgets.ts](/E:/my-codes/spendwise/lib/budgets.ts:1)
-- [lib/expenses.ts](/E:/my-codes/spendwise/lib/expenses.ts:1)
-- [lib/savings.ts](/E:/my-codes/spendwise/lib/savings.ts:1)
-- [lib/transactions.ts](/E:/my-codes/spendwise/lib/transactions.ts:1)
-- [lib/analytics.ts](/E:/my-codes/spendwise/lib/analytics.ts:1)
-- [lib/reports.ts](/E:/my-codes/spendwise/lib/reports.ts:1)
+- [lib/incomes.ts](../lib/incomes.ts)
+- [lib/budgets.ts](../lib/budgets.ts)
+- [lib/expenses.ts](../lib/expenses.ts)
+- [lib/savings.ts](../lib/savings.ts)
+- [lib/transactions.ts](../lib/transactions.ts)
+- [lib/analytics.ts](../lib/analytics.ts)
+- [lib/reports.ts](../lib/reports.ts)
 
 All loaders:
 
@@ -524,7 +538,7 @@ All loaders:
 
 Finance mutations live in:
 
-- [app/dashboard/actions.ts](/E:/my-codes/spendwise/app/dashboard/actions.ts:1)
+- [app/dashboard/actions.ts](../app/dashboard/actions.ts)
 
 ### Income actions
 
@@ -562,7 +576,7 @@ All current finance server actions:
 
 Primary file:
 
-- [components/spendwise-dashboard.tsx](/E:/my-codes/spendwise/components/spendwise-dashboard.tsx:1)
+- [components/spendwise-dashboard.tsx](../components/spendwise-dashboard.tsx)
 
 This component is responsible for:
 
@@ -584,8 +598,8 @@ and keeps that local feed synchronized after successful client mutations.
 
 ### Backend analytics calculations
 
-Analytics is computed through [lib/analytics.ts](/E:/my-codes/spendwise/lib/analytics.ts:1)
-and shared typed helpers in [lib/analytics-shared.ts](/E:/my-codes/spendwise/lib/analytics-shared.ts:1).
+Analytics is computed through [lib/analytics.ts](../lib/analytics.ts)
+and shared typed helpers in [lib/analytics-shared.ts](../lib/analytics-shared.ts).
 The analytics layer derives monthly trends, category breakdowns, savings rate,
 budget efficiency, and budget variance from persisted finance rows. The Analytics
 trend chart can regroup the same persisted data by daily, weekly, monthly, or
@@ -593,8 +607,8 @@ custom date-range filters.
 
 ### Backend report calculations
 
-Reports are computed through [lib/reports.ts](/E:/my-codes/spendwise/lib/reports.ts:1)
-and shared typed helpers in [lib/reports-shared.ts](/E:/my-codes/spendwise/lib/reports-shared.ts:1).
+Reports are computed through [lib/reports.ts](../lib/reports.ts)
+and shared typed helpers in [lib/reports-shared.ts](../lib/reports-shared.ts).
 The report layer derives month-keyed summaries from persisted incomes, expenses,
 budgets, savings goals, and savings entries. Each monthly report includes
 income, expenses, net savings, savings contribution/withdrawal totals, top
@@ -611,26 +625,30 @@ The dashboard is currently the application composition layer, not just a visual 
 
 | File | Responsibility |
 | --- | --- |
-| [app/dashboard/page.tsx](/E:/my-codes/spendwise/app/dashboard/page.tsx:1) | Protected dashboard loader |
-| [app/dashboard/actions.ts](/E:/my-codes/spendwise/app/dashboard/actions.ts:1) | Finance server actions |
-| [components/spendwise-dashboard.tsx](/E:/my-codes/spendwise/components/spendwise-dashboard.tsx:1) | Main finance workspace UI |
-| [lib/analytics.ts](/E:/my-codes/spendwise/lib/analytics.ts:1) | Server analytics loader |
-| [lib/analytics-shared.ts](/E:/my-codes/spendwise/lib/analytics-shared.ts:1) | Shared analytics calculations and types |
-| [lib/reports.ts](/E:/my-codes/spendwise/lib/reports.ts:1) | Server reports loader |
-| [lib/reports-shared.ts](/E:/my-codes/spendwise/lib/reports-shared.ts:1) | Shared report calculations and types |
-| [lib/transactions.ts](/E:/my-codes/spendwise/lib/transactions.ts:1) | Unified server transaction loader |
-| [lib/transactions-shared.ts](/E:/my-codes/spendwise/lib/transactions-shared.ts:1) | Shared transaction DTO |
-| [app/(auth)/actions.ts](/E:/my-codes/spendwise/app/(auth)/actions.ts:1) | Register and login actions |
-| [app/(auth)/layout.tsx](/E:/my-codes/spendwise/app/(auth)/layout.tsx:1) | Redirect authenticated users away from auth pages |
-| [app/auth/confirm/page.tsx](/E:/my-codes/spendwise/app/auth/confirm/page.tsx:1) | Confirm email status page |
-| [app/auth/confirm/verify/route.ts](/E:/my-codes/spendwise/app/auth/confirm/verify/route.ts:1) | OTP verification route |
-| [lib/supabase/server.ts](/E:/my-codes/spendwise/lib/supabase/server.ts:1) | Server Supabase client |
-| [lib/supabase/client.ts](/E:/my-codes/spendwise/lib/supabase/client.ts:1) | Browser Supabase client |
-| [lib/supabase/proxy.ts](/E:/my-codes/spendwise/lib/supabase/proxy.ts:1) | Session refresh proxy helper |
+| [app/dashboard/page.tsx](../app/dashboard/page.tsx) | Protected dashboard loader |
+| [app/dashboard/actions.ts](../app/dashboard/actions.ts) | Finance server actions |
+| [components/spendwise-dashboard.tsx](../components/spendwise-dashboard.tsx) | Main finance workspace UI |
+| [lib/analytics.ts](../lib/analytics.ts) | Server analytics loader |
+| [lib/analytics-shared.ts](../lib/analytics-shared.ts) | Shared analytics calculations and types |
+| [lib/reports.ts](../lib/reports.ts) | Server reports loader |
+| [lib/reports-shared.ts](../lib/reports-shared.ts) | Shared report calculations and types |
+| [lib/transactions.ts](../lib/transactions.ts) | Unified server transaction loader |
+| [lib/transactions-shared.ts](../lib/transactions-shared.ts) | Shared transaction DTO |
+| [app/(auth)/actions.ts](<../app/(auth)/actions.ts>) | Register and login actions |
+| [app/(auth)/layout.tsx](<../app/(auth)/layout.tsx>) | Redirect authenticated users away from auth pages |
+| [app/auth/confirm/page.tsx](../app/auth/confirm/page.tsx) | Confirm email status page |
+| [app/auth/confirm/verify/route.ts](../app/auth/confirm/verify/route.ts) | OTP verification route |
+| [lib/auth-validation.ts](../lib/auth-validation.ts) | Shared server and client registration validation |
+| [lib/error-message.ts](../lib/error-message.ts) | Public error sanitization and server-side reporting |
+| [lib/supabase/server.ts](../lib/supabase/server.ts) | Server Supabase client |
+| [lib/supabase/client.ts](../lib/supabase/client.ts) | Browser Supabase client |
+| [lib/supabase/proxy.ts](../lib/supabase/proxy.ts) | Session refresh proxy helper |
+| [tests/auth-validation.test.ts](../tests/auth-validation.test.ts) | Registration validation tests |
+| [tests/error-message.test.ts](../tests/error-message.test.ts) | Public error handling tests |
 
 ## 14. Current Gaps
 
-The app is functional, but not yet a fully persisted finance platform.
+The app is functional, but not yet feature-complete.
 
 Remaining gaps:
 
@@ -656,5 +674,6 @@ The important system invariant is:
 - **income records inflow**
 - **budgets record planned allocation**
 - **expenses record actual spending**
+- **savings entries record contributions to and withdrawals from goals**
 
 Everything else in the current finance model is derived from those sources.

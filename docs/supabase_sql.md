@@ -1,8 +1,8 @@
 # Supabase SQL for SpendWise
 
-This file contains the SQL you need to run in the Supabase SQL Editor for the SpendWise auth setup.
+This file contains the SQL you need to run in the Supabase SQL Editor for the SpendWise database setup.
 
-Use it together with [supabase.md](/E:/my-codes/spendwise/docs/supabase.md).
+Use it together with [supabase.md](supabase.md).
 
 ## Recommended Order
 
@@ -123,9 +123,9 @@ using ((select auth.uid()) = id)
 with check ((select auth.uid()) = id);
 ```
 
-## 6. Full Combined SQL Block
+## 6. Combined Profile Setup SQL Block
 
-Run this if you want to execute the whole setup at once:
+Run this if you want to execute the complete profile setup at once:
 
 ```sql
 create extension if not exists pgcrypto;

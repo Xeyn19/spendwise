@@ -20,7 +20,7 @@ SpendWise is a Next.js 16 personal finance application with:
 - email confirmation flow
 - protected dashboard access
 - Supabase profile storage
-- income CRUD flow used by the dashboard
+- income create/delete flow used by the dashboard
 - budget CRUD flow used by the dashboard
 - expense create/delete flow used by the dashboard
 - savings goal create/delete flow used by the dashboard
@@ -31,6 +31,9 @@ SpendWise is a Next.js 16 personal finance application with:
 - unified server transaction feed across income, expenses, and savings entries
 - budget-to-income validation
 - expense-to-budget derived matching
+- server-side registration validation and sanitized public error messages
+- application-wide browser security headers
+- automated tests for auth validation and public error handling
 
 ### Not fully completed yet
 
@@ -48,6 +51,7 @@ SpendWise is a Next.js 16 personal finance application with:
 | Charts | Recharts |
 | PDF export | jsPDF + jspdf-autotable |
 | Notifications | Sonner |
+| Tests | Vitest |
 
 ## Project Structure
 
@@ -66,15 +70,15 @@ public/
 
 Important files:
 
-- [app/dashboard/page.tsx](/E:/my-codes/spendwise/app/dashboard/page.tsx:1)
-- [app/dashboard/actions.ts](/E:/my-codes/spendwise/app/dashboard/actions.ts:1)
-- [components/spendwise-dashboard.tsx](/E:/my-codes/spendwise/components/spendwise-dashboard.tsx:1)
-- [lib/transactions.ts](/E:/my-codes/spendwise/lib/transactions.ts:1)
-- [app/(auth)/actions.ts](/E:/my-codes/spendwise/app/(auth)/actions.ts:1)
-- [lib/supabase/server.ts](/E:/my-codes/spendwise/lib/supabase/server.ts:1)
-- [docs/PROJECT_ARCHITECTURE.md](/E:/my-codes/spendwise/docs/PROJECT_ARCHITECTURE.md:1)
-- [docs/supabase.md](/E:/my-codes/spendwise/docs/supabase.md:1)
-- [docs/supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md:1)
+- [app/dashboard/page.tsx](app/dashboard/page.tsx)
+- [app/dashboard/actions.ts](app/dashboard/actions.ts)
+- [components/spendwise-dashboard.tsx](components/spendwise-dashboard.tsx)
+- [lib/transactions.ts](lib/transactions.ts)
+- [app/(auth)/actions.ts](<app/(auth)/actions.ts>)
+- [lib/supabase/server.ts](lib/supabase/server.ts)
+- [docs/PROJECT_ARCHITECTURE.md](docs/PROJECT_ARCHITECTURE.md)
+- [docs/supabase.md](docs/supabase.md)
+- [docs/supabase_sql.md](docs/supabase_sql.md)
 
 ## Finance Model
 
@@ -104,7 +108,7 @@ npm install
 
 ## 2. Configure environment variables
 
-Create or update [`.env.local`](/E:/my-codes/spendwise/.env.local:1):
+Create or update `.env.local` using the placeholders in [`.env.example`](.env.example):
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
@@ -127,11 +131,11 @@ SUPABASE_SECRET_KEY=your-supabase-secret-key
 
 Read:
 
-- [docs/supabase.md](/E:/my-codes/spendwise/docs/supabase.md:1)
+- [docs/supabase.md](docs/supabase.md)
 
 Then run the SQL from:
 
-- [docs/supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md:1)
+- [docs/supabase_sql.md](docs/supabase_sql.md)
 
 Recommended order:
 
@@ -140,6 +144,8 @@ Recommended order:
 3. budgets
 4. expenses
 5. savings goals and entries
+6. unified finance transaction view
+7. atomic savings-balance trigger
 
 ## 4. Start the app
 
@@ -158,6 +164,7 @@ npm run dev
 npm run build
 npm run start
 npm run lint
+npm test
 ```
 
 ## Current Routes
@@ -169,6 +176,8 @@ npm run lint
 | `/login` | Login |
 | `/register` | Register |
 | `/auth/confirm` | Email confirmation page |
+| `/auth/confirm/verify` | Email verification endpoint |
+| `/auth/signout` | Sign out endpoint |
 | `/dashboard` | Protected finance workspace |
 
 ## Dashboard Modules
@@ -226,14 +235,22 @@ These are currently client-side sections inside one dashboard page, not separate
 - unbudgeted expenses are allowed
 - over-budget expenses are allowed
 
+### Savings
+
+- goal name and target amount are required
+- target amounts and entry amounts must be greater than zero
+- a date is required for each savings entry
+- entries must be contributions or withdrawals
+- withdrawals cannot make a savings goal balance negative
+
 ## Documentation
 
 Project docs:
 
-- [docs/PROJECT_ARCHITECTURE.md](/E:/my-codes/spendwise/docs/PROJECT_ARCHITECTURE.md:1)
-- [docs/supabase.md](/E:/my-codes/spendwise/docs/supabase.md:1)
-- [docs/supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md:1)
-- [docs/flowchart.md](/E:/my-codes/spendwise/docs/flowchart.md:1)
+- [docs/PROJECT_ARCHITECTURE.md](docs/PROJECT_ARCHITECTURE.md)
+- [docs/supabase.md](docs/supabase.md)
+- [docs/supabase_sql.md](docs/supabase_sql.md)
+- [docs/flowchart.md](docs/flowchart.md)
 
 ## Deployment Notes
 
