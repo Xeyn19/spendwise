@@ -16,8 +16,8 @@ It covers:
 
 Use this guide together with:
 
-- [docs/supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md:1)
-- [docs/PROJECT_ARCHITECTURE.md](/E:/my-codes/spendwise/docs/PROJECT_ARCHITECTURE.md:1)
+- [supabase_sql.md](supabase_sql.md)
+- [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md)
 
 ## 2. What Supabase Does in This Project
 
@@ -37,6 +37,8 @@ Supabase currently provides two major capabilities:
 - income storage
 - budget storage
 - expense storage
+- savings goal and entry storage
+- a unified, read-only finance transaction view
 - row-level security per authenticated user
 
 ## 3. Current Supabase-Backed Data Model
@@ -65,7 +67,7 @@ Savings is persisted as goals plus dated entries. Saved totals are derived from
 
 ## 4.1 Minimum local environment
 
-Open [`.env.local`](/E:/my-codes/spendwise/.env.local:1) and define:
+Create or update `.env.local` using the placeholders in [`.env.example`](../.env.example):
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
@@ -101,9 +103,8 @@ Important:
 
 Relevant files:
 
-- [`.env.example`](/E:/my-codes/spendwise/.env.example:1)
-- [`.env.local`](/E:/my-codes/spendwise/.env.local:1)
-- [lib/supabase/config.ts](/E:/my-codes/spendwise/lib/supabase/config.ts:1)
+- [`.env.example`](../.env.example)
+- [lib/supabase/config.ts](../lib/supabase/config.ts)
 
 ## 5. Supabase Dashboard Configuration
 
@@ -185,7 +186,7 @@ Recommended production redirect URLs:
 
 ## 6. SQL Setup Order
 
-Run the SQL from [docs/supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md:1) in this order:
+Run the SQL from [supabase_sql.md](supabase_sql.md) in this order:
 
 1. profiles
 2. shared `updated_at` trigger function
@@ -218,7 +219,7 @@ the database trigger is the authoritative concurrency guard.
 
 File:
 
-- [lib/supabase/client.ts](/E:/my-codes/spendwise/lib/supabase/client.ts:1)
+- [lib/supabase/client.ts](../lib/supabase/client.ts)
 
 Uses:
 
@@ -232,7 +233,7 @@ Purpose:
 
 File:
 
-- [lib/supabase/server.ts](/E:/my-codes/spendwise/lib/supabase/server.ts:1)
+- [lib/supabase/server.ts](../lib/supabase/server.ts)
 
 Uses:
 
@@ -249,8 +250,8 @@ Purpose:
 
 Files:
 
-- [proxy.ts](/E:/my-codes/spendwise/proxy.ts:1)
-- [lib/supabase/proxy.ts](/E:/my-codes/spendwise/lib/supabase/proxy.ts:1)
+- [proxy.ts](../proxy.ts)
+- [lib/supabase/proxy.ts](../lib/supabase/proxy.ts)
 
 Purpose:
 
@@ -261,7 +262,7 @@ Purpose:
 
 File:
 
-- [lib/supabase/stateless.ts](/E:/my-codes/spendwise/lib/supabase/stateless.ts:1)
+- [lib/supabase/stateless.ts](../lib/supabase/stateless.ts)
 
 Purpose:
 
@@ -274,7 +275,7 @@ Purpose:
 
 File:
 
-- [app/(auth)/actions.ts](/E:/my-codes/spendwise/app/(auth)/actions.ts:1)
+- [app/(auth)/actions.ts](<../app/(auth)/actions.ts>)
 
 `registerAction`:
 
@@ -301,8 +302,8 @@ directly to `/dashboard`. Otherwise it tells the user to confirm email first.
 
 Files:
 
-- [app/auth/confirm/page.tsx](/E:/my-codes/spendwise/app/auth/confirm/page.tsx:1)
-- [app/auth/confirm/verify/route.ts](/E:/my-codes/spendwise/app/auth/confirm/verify/route.ts:1)
+- [app/auth/confirm/page.tsx](../app/auth/confirm/page.tsx)
+- [app/auth/confirm/verify/route.ts](../app/auth/confirm/verify/route.ts)
 
 The verification route:
 
@@ -319,11 +320,11 @@ The verification route:
 
 Files:
 
-- [lib/incomes.ts](/E:/my-codes/spendwise/lib/incomes.ts:1)
-- [lib/budgets.ts](/E:/my-codes/spendwise/lib/budgets.ts:1)
-- [lib/expenses.ts](/E:/my-codes/spendwise/lib/expenses.ts:1)
-- [lib/savings.ts](/E:/my-codes/spendwise/lib/savings.ts:1)
-- [lib/transactions.ts](/E:/my-codes/spendwise/lib/transactions.ts:1)
+- [lib/incomes.ts](../lib/incomes.ts)
+- [lib/budgets.ts](../lib/budgets.ts)
+- [lib/expenses.ts](../lib/expenses.ts)
+- [lib/savings.ts](../lib/savings.ts)
+- [lib/transactions.ts](../lib/transactions.ts)
 
 Each loader:
 
@@ -336,13 +337,15 @@ Each loader:
 
 File:
 
-- [app/dashboard/actions.ts](/E:/my-codes/spendwise/app/dashboard/actions.ts:1)
+- [app/dashboard/actions.ts](../app/dashboard/actions.ts)
 
 Current actions:
 
 - create/delete income
 - create/update/delete budget
 - create/delete expense
+- create/delete savings goals
+- create savings contributions and withdrawals
 
 Important logic:
 
@@ -464,9 +467,9 @@ Check:
 
 ## 14. Project-Specific References
 
-- [docs/supabase_sql.md](/E:/my-codes/spendwise/docs/supabase_sql.md:1)
-- [docs/PROJECT_ARCHITECTURE.md](/E:/my-codes/spendwise/docs/PROJECT_ARCHITECTURE.md:1)
-- [app/(auth)/actions.ts](/E:/my-codes/spendwise/app/(auth)/actions.ts:1)
-- [app/dashboard/actions.ts](/E:/my-codes/spendwise/app/dashboard/actions.ts:1)
-- [lib/supabase/config.ts](/E:/my-codes/spendwise/lib/supabase/config.ts:1)
-- [lib/supabase/server.ts](/E:/my-codes/spendwise/lib/supabase/server.ts:1)
+- [supabase_sql.md](supabase_sql.md)
+- [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md)
+- [app/(auth)/actions.ts](<../app/(auth)/actions.ts>)
+- [app/dashboard/actions.ts](../app/dashboard/actions.ts)
+- [lib/supabase/config.ts](../lib/supabase/config.ts)
+- [lib/supabase/server.ts](../lib/supabase/server.ts)

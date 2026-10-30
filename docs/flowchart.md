@@ -1,3 +1,4 @@
+```text
 START
   ↓
 User Logs In
@@ -9,7 +10,10 @@ Fetch User Data From Database
   ├── Budget Records
   ├── Expense Records
   ├── Savings Goals
-  └── Recent Transactions
+  ├── Savings Entries
+  ├── Unified Recent Transactions
+  ├── Analytics
+  └── Monthly Reports
   ↓
 Calculate Dashboard Analytics
   ├── Total Income
@@ -100,7 +104,7 @@ User Action?
   │      ↓
   │   Match Expense Category
   │      ↓
-  │   Deduct Expense From Budget
+  │   Derive Updated Budget Usage
   │      ↓
   │   Update Remaining Balance
   │      ↓
@@ -118,7 +122,7 @@ User Action?
   │
   ├── View Analytics
   │      ↓
-  │   Open Analytics Page
+  │   Display Analytics Dashboard Section
   │
   ├── Generate Report
   │      ↓
@@ -127,3 +131,4 @@ User Action?
   └── Logout
          ↓
         END
+```
