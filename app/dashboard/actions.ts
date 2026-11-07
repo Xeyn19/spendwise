@@ -12,28 +12,28 @@ import type { SavingsEntryRecord, SavingsEntryType, SavingsGoalRecord } from "@/
 import { getSavingsEntrySignedAmount } from "@/lib/savings-shared";
 import { createClient } from "@/lib/supabase/server";
 
-type IncomeActionResult = {
+export type IncomeActionResult = {
   success: boolean;
   message?: string;
   income?: IncomeRecord;
   deletedId?: string;
 };
 
-type BudgetActionResult = {
+export type BudgetActionResult = {
   success: boolean;
   message?: string;
   budget?: BudgetRecord;
   deletedId?: string;
 };
 
-type ExpenseActionResult = {
+export type ExpenseActionResult = {
   success: boolean;
   message?: string;
   expense?: ExpenseRecord;
   deletedId?: string;
 };
 
-type SavingsGoalActionResult = {
+export type SavingsGoalActionResult = {
   success: boolean;
   message?: string;
   goal?: SavingsGoalRecord;
@@ -41,7 +41,7 @@ type SavingsGoalActionResult = {
   deletedId?: string;
 };
 
-type SavingsEntryActionResult = {
+export type SavingsEntryActionResult = {
   success: boolean;
   message?: string;
   goal?: SavingsGoalRecord;
@@ -69,6 +69,18 @@ function parseAmount(value: string) {
 
 function isValidDateString(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function parseClientId(formData: FormData, field = "clientId") {
+  const value = String(formData.get(field) ?? "").trim();
+
+  if (!value) {
+    return undefined;
+  }
+
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    ? value
+    : null;
 }
 
 function toSavingsGoalRecord(row: {
@@ -354,7 +366,12 @@ export async function createIncomeAction(formData: FormData): Promise<IncomeActi
   const amountValue = String(formData.get("amount") ?? "").trim();
   const receivedOn = String(formData.get("receivedOn") ?? "").trim();
   const note = String(formData.get("note") ?? "").trim();
+  const clientId = parseClientId(formData);
   const amount = parseAmount(amountValue);
+
+  if (clientId === null) {
+    return { success: false, message: "Invalid offline record identifier." };
+  }
 
   if (!source) {
     return { success: false, message: "Source is required." };
@@ -370,13 +387,14 @@ export async function createIncomeAction(formData: FormData): Promise<IncomeActi
 
   const { data, error } = await supabase
     .from("incomes")
-    .insert({
+    .upsert({
+      ...(clientId ? { id: clientId } : {}),
       user_id: userId,
       source,
       amount,
       received_on: receivedOn,
       note,
-    })
+    }, { onConflict: "id" })
     .select("id, source, amount, received_on, note, created_at")
     .single();
 
@@ -474,7 +492,12 @@ export async function createExpenseAction(formData: FormData): Promise<ExpenseAc
   const amountValue = String(formData.get("amount") ?? "").trim();
   const spentOn = String(formData.get("spentOn") ?? "").trim();
   const note = String(formData.get("note") ?? "").trim();
+  const clientId = parseClientId(formData);
   const amount = parseAmount(amountValue);
+
+  if (clientId === null) {
+    return { success: false, message: "Invalid offline record identifier." };
+  }
 
   if (!category) {
     return { success: false, message: "Category is required." };
@@ -490,13 +513,14 @@ export async function createExpenseAction(formData: FormData): Promise<ExpenseAc
 
   const { data, error } = await supabase
     .from("expenses")
-    .insert({
+    .upsert({
+      ...(clientId ? { id: clientId } : {}),
       user_id: userId,
       category,
       amount,
       spent_on: spentOn,
       note,
-    })
+    }, { onConflict: "id" })
     .select("id, category, amount, spent_on, note, created_at")
     .single();
 
@@ -563,7 +587,12 @@ export async function createBudgetAction(formData: FormData): Promise<BudgetActi
   const amountValue = String(formData.get("allocatedAmount") ?? "").trim();
   const periodStart = String(formData.get("periodStart") ?? "").trim();
   const periodEnd = String(formData.get("periodEnd") ?? "").trim();
+  const clientId = parseClientId(formData);
   const allocatedAmount = parseAmount(amountValue);
+
+  if (clientId === null) {
+    return { success: false, message: "Invalid offline record identifier." };
+  }
 
   if (!category) {
     return { success: false, message: "Category is required." };
@@ -595,6 +624,7 @@ export async function createBudgetAction(formData: FormData): Promise<BudgetActi
     allocatedAmount,
     periodStart,
     periodEnd,
+    budgetId: clientId,
   });
 
   if (validationMessage) {
@@ -603,14 +633,15 @@ export async function createBudgetAction(formData: FormData): Promise<BudgetActi
 
   const { data, error } = await supabase
     .from("budgets")
-    .insert({
+    .upsert({
+      ...(clientId ? { id: clientId } : {}),
       user_id: userId,
       category,
       icon,
       allocated_amount: allocatedAmount,
       period_start: periodStart,
       period_end: periodEnd,
-    })
+    }, { onConflict: "id" })
     .select("id, category, icon, allocated_amount, period_start, period_end, created_at")
     .single();
 
@@ -758,6 +789,12 @@ export async function createSavingsGoalAction(
   const targetAmount = parseAmount(targetAmountValue);
   const initialSaved = initialSavedValue ? parseAmount(initialSavedValue) : 0;
   const entryDate = String(formData.get("entryDate") ?? "").trim();
+  const clientId = parseClientId(formData);
+  const entryClientId = parseClientId(formData, "entryClientId");
+
+  if (clientId === null || entryClientId === null) {
+    return { success: false, message: "Invalid offline record identifier." };
+  }
 
   if (!name) {
     return { success: false, message: "Goal name is required." };
@@ -777,11 +814,12 @@ export async function createSavingsGoalAction(
 
   const { data: goalData, error: goalError } = await supabase
     .from("savings_goals")
-    .insert({
+    .upsert({
+      ...(clientId ? { id: clientId } : {}),
       user_id: userId,
       name,
       target_amount: targetAmount,
-    })
+    }, { onConflict: "id" })
     .select("id, name, target_amount, created_at")
     .single();
 
@@ -797,14 +835,15 @@ export async function createSavingsGoalAction(
   if (initialSaved > 0) {
     const { data: entryData, error: entryError } = await supabase
       .from("savings_entries")
-      .insert({
+      .upsert({
+        ...(entryClientId ? { id: entryClientId } : {}),
         user_id: userId,
         goal_id: goalData.id,
         type: "contribution",
         amount: initialSaved,
         entry_date: entryDate,
         note: "Initial savings",
-      })
+      }, { onConflict: "id" })
       .select("id, goal_id, type, amount, entry_date, note, created_at")
       .single();
 
@@ -881,7 +920,12 @@ export async function createSavingsEntryAction(
   const amountValue = String(formData.get("amount") ?? "").trim();
   const entryDate = String(formData.get("entryDate") ?? "").trim();
   const note = String(formData.get("note") ?? "").trim();
+  const clientId = parseClientId(formData);
   const amount = parseAmount(amountValue);
+
+  if (clientId === null) {
+    return { success: false, message: "Invalid offline record identifier." };
+  }
 
   if (type !== "contribution" && type !== "withdrawal") {
     return { success: false, message: "Savings entry type is required." };
@@ -893,6 +937,46 @@ export async function createSavingsEntryAction(
 
   if (!isValidDateString(entryDate)) {
     return { success: false, message: "Date is required." };
+  }
+
+  if (clientId) {
+    const { data: existingEntry, error: existingEntryError } = await supabase
+      .from("savings_entries")
+      .select("id, goal_id, type, amount, entry_date, note, created_at")
+      .eq("id", clientId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (existingEntryError) {
+      return {
+        success: false,
+        message: reportPublicError(
+          "load existing savings entry",
+          existingEntryError,
+          "Could not verify the pending savings entry."
+        ),
+      };
+    }
+
+    if (existingEntry) {
+      const existingGoalResult = await getSavingsGoalWithSavedAmount({ goalId, userId });
+
+      if (existingGoalResult.error || !existingGoalResult.goal) {
+        return {
+          success: false,
+          message: existingGoalResult.error ?? "Savings goal not found.",
+        };
+      }
+
+      return {
+        success: true,
+        goal: existingGoalResult.goal,
+        entry: toSavingsEntryRecord(
+          { ...existingEntry, type: existingEntry.type as SavingsEntryType },
+          existingGoalResult.goal.name
+        ),
+      };
+    }
   }
 
   const goalResult = await getSavingsGoalWithSavedAmount({ goalId, userId });
@@ -913,14 +997,15 @@ export async function createSavingsEntryAction(
 
   const { data, error } = await supabase
     .from("savings_entries")
-    .insert({
+    .upsert({
+      ...(clientId ? { id: clientId } : {}),
       user_id: userId,
       goal_id: goalId,
       type,
       amount,
       entry_date: entryDate,
       note,
-    })
+    }, { onConflict: "id" })
     .select("id, goal_id, type, amount, entry_date, note, created_at")
     .single();
 

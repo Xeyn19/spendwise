@@ -76,7 +76,7 @@ export default async function DashboardPage() {
 
   return (
     <SpendWiseDashboard
-      user={{ name: fullName, email }}
+      user={{ id: claims.sub, name: fullName, email }}
       initialIncomes={incomes}
       initialBudgets={budgets}
       initialExpenses={expenses}
@@ -86,6 +86,7 @@ export default async function DashboardPage() {
       initialAnalyticsData={analytics}
       initialReportData={reports}
       todayIso={todayIso}
+      serverSnapshotAt={new Date().toISOString()}
     />
   );
 }

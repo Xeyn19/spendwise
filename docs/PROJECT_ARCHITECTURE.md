@@ -39,6 +39,8 @@ The current architecture is intentionally hybrid:
 | Authentication | Supabase Auth |
 | Database | Supabase Postgres |
 | Server data writes | Next.js Server Actions |
+| Offline persistence | IndexedDB |
+| PWA runtime | Web App Manifest, Service Worker, Cache Storage |
 | Charts | Recharts |
 | PDF export | jsPDF + jspdf-autotable |
 | Notifications | Sonner |
@@ -59,12 +61,15 @@ SpendWise is split into three major runtime areas:
    - authenticated-only finance workspace
    - all finance subpages currently live inside one `/dashboard` route as client-side views
 
-At runtime, Supabase handles identity and row ownership, while the app handles:
+At runtime, Supabase handles identity, row ownership, and the authoritative
+shared data store, while the app handles:
 
 - session-aware rendering
 - server-side loading of protected finance data
 - form validation
 - mutation orchestration
+- local-first snapshots and an ordered mutation outbox
+- background replay after connectivity returns
 - derived metrics and visualizations
 
 ## 4. Route Architecture
@@ -497,6 +502,8 @@ When deleting income:
 | Recent transactions | `public.finance_transactions` view |
 | Analytics | Live backend computation from persisted finance tables |
 | Reports | Live backend computation from persisted finance tables |
+| Offline dashboard snapshot | Per-user IndexedDB record |
+| Pending finance mutations | Per-user ordered IndexedDB outbox |
 
 ## 10. Dashboard Data Flow
 
@@ -513,7 +520,9 @@ When deleting income:
 9. Analytics are computed server-side from persisted finance rows
 10. Reports are computed server-side from persisted finance rows
 11. Data is passed into `SpendWiseDashboard`
-12. Client renders totals, chart datasets, and page-level views
+12. The client compares the server snapshot with its per-user IndexedDB snapshot
+13. A newer local snapshot or pending outbox is restored before local use continues
+14. Client renders totals, chart datasets, and page-level views
 
 ### Server-side loaders
 
@@ -564,11 +573,21 @@ Finance mutations live in:
 
 ### Mutation behavior
 
-All current finance server actions:
+Dashboard mutations are local-first:
+
+1. The client creates a UUID and writes the mutation to IndexedDB.
+2. The dashboard applies the same change optimistically to local state.
+3. The local dashboard snapshot is updated.
+4. When online, the sync worker replays queued mutations in creation order.
+5. A successful mutation is removed from the outbox; a rejected mutation remains
+   queued and the sync-status banner exposes the validation error and retry action.
+
+The Server Actions used during replay:
 
 - verify the authenticated user
 - validate incoming data
 - scope every mutation by `user_id`
+- accept validated client-generated UUIDs for idempotent create retries
 - sanitize Supabase errors before surfacing them
 - call `revalidatePath("/dashboard")`
 
@@ -582,7 +601,9 @@ This component is responsible for:
 
 - sidebar navigation
 - quick action modals
-- optimistic/local state integration after successful server actions
+- optimistic local state integration before server synchronization
+- IndexedDB snapshot hydration and persistence
+- ordered outbox synchronization and visible connectivity status
 - derived finance metrics
 - charts and summary cards
 - savings goal and entry UI
@@ -593,8 +614,9 @@ The dashboard derives:
 
 - budget spent and remaining values
 
-The dashboard initializes recent transactions from the unified server loader
-and keeps that local feed synchronized after successful client mutations.
+The dashboard initializes recent transactions from the unified server loader,
+can restore a newer offline snapshot, and keeps the feed synchronized as local
+mutations are queued and later accepted by the server.
 
 ### Backend analytics calculations
 
@@ -628,6 +650,12 @@ The dashboard is currently the application composition layer, not just a visual 
 | [app/dashboard/page.tsx](../app/dashboard/page.tsx) | Protected dashboard loader |
 | [app/dashboard/actions.ts](../app/dashboard/actions.ts) | Finance server actions |
 | [components/spendwise-dashboard.tsx](../components/spendwise-dashboard.tsx) | Main finance workspace UI |
+| [hooks/use-offline-sync.ts](../hooks/use-offline-sync.ts) | Connectivity state and ordered outbox replay |
+| [lib/offline/storage.ts](../lib/offline/storage.ts) | IndexedDB snapshots and pending mutations |
+| [lib/offline/sync.ts](../lib/offline/sync.ts) | Typed mutation-to-Server-Action adapter |
+| [lib/offline/types.ts](../lib/offline/types.ts) | Offline snapshot and mutation contracts |
+| [app/manifest.ts](../app/manifest.ts) | Installable PWA metadata |
+| [public/sw.js](../public/sw.js) | Static assets, offline fallback, and dashboard document cache |
 | [lib/analytics.ts](../lib/analytics.ts) | Server analytics loader |
 | [lib/analytics-shared.ts](../lib/analytics-shared.ts) | Shared analytics calculations and types |
 | [lib/reports.ts](../lib/reports.ts) | Server reports loader |
@@ -654,11 +682,13 @@ Remaining gaps:
 
 - individual savings entries cannot yet be edited or deleted
 - dashboard subpages are not yet independent routes
+- rejected offline mutations have retry/error feedback but no dedicated conflict editor
 
 ## 15. Recommended Next Steps
 
 1. Add edit/delete support for individual savings entries
-2. Consider splitting dashboard subviews into route-level pages if complexity grows
+2. Add a dedicated conflict editor for rejected offline mutations
+3. Consider splitting dashboard subviews into route-level pages if complexity grows
 
 ## 16. Architecture Summary
 
@@ -668,6 +698,7 @@ SpendWise is currently best understood as:
 - a database-backed personal finance dashboard for incomes, budgets, expenses, and savings
 - a unified, RLS-protected transaction read model over the finance tables
 - backend-computed analytics and monthly reporting over persisted finance data
+- an installable PWA with per-user local snapshots and durable mutation replay
 
 The important system invariant is:
 
