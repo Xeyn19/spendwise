@@ -4,6 +4,8 @@ START
 User Logs In
   ↓
 Load User Dashboard
+  ├── Online: fetch current server data
+  └── Offline reload: restore cached dashboard document
   ↓
 Fetch User Data From Database
   ├── Income Records
@@ -14,6 +16,10 @@ Fetch User Data From Database
   ├── Unified Recent Transactions
   ├── Analytics
   └── Monthly Reports
+  ↓
+Compare With Per-User IndexedDB State
+  ├── Restore newer local dashboard snapshot
+  └── Count pending mutation outbox entries
   ↓
 Calculate Dashboard Analytics
   ├── Total Income
@@ -84,7 +90,7 @@ User Action?
   │      ↓
   │   Open Add Income Modal
   │      ↓
-  │   Save Income
+  │   Save Income To IndexedDB Outbox
   │      ↓
   │   Refresh Dashboard Analytics
   │
@@ -94,7 +100,7 @@ User Action?
   │      ↓
   │   Validate Budget <= Income
   │      ↓
-  │   Save Budget
+  │   Save Budget To IndexedDB Outbox
   │      ↓
   │   Refresh Budget Progress
   │
@@ -103,6 +109,8 @@ User Action?
   │   Open Expense Modal
   │      ↓
   │   Match Expense Category
+  │      ↓
+  │   Save Expense To IndexedDB Outbox
   │      ↓
   │   Derive Updated Budget Usage
   │      ↓
@@ -114,7 +122,7 @@ User Action?
   │      ↓
   │   Open Savings Modal
   │      ↓
-  │   Save Contribution
+  │   Save Contribution To IndexedDB Outbox
   │      ↓
   │   Update Savings Progress
   │      ↓
@@ -130,5 +138,18 @@ User Action?
   │
   └── Logout
          ↓
+      Clear Cached Private Dashboard Document
+         ↓
         END
+
+Pending Mutations?
+  ├── Offline
+  │      ↓
+  │   Keep Changes On Device And Show Pending Count
+  │
+  └── Online
+         ↓
+      Replay Mutations In Creation Order
+         ├── Accepted: remove mutation and apply canonical server result
+         └── Rejected: keep mutation and show retry/error status
 ```

@@ -347,11 +347,18 @@ Current actions:
 - create/delete savings goals
 - create savings contributions and withdrawals
 
+The dashboard persists these operations in a per-user IndexedDB outbox before
+calling Supabase. Replays use client-generated UUID primary keys so a create can
+be retried without duplicating a finance record. The existing RLS policies and
+Server Action authentication remain authoritative for every replay.
+
 Important logic:
 
 - budgets are validated against same-period income
 - overlapping budgets for the same category are blocked
 - deleting income is blocked if it would invalidate existing budgets
+- failed server validation leaves the local mutation queued and visible in the
+  dashboard sync-status banner
 
 ## 10. Finance Model Rules
 

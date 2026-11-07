@@ -9,6 +9,7 @@ SpendWise is a Next.js 16 personal finance application with:
 - persisted savings goals and entries
 - backend-computed analytics and monthly reports
 - client PDF export for reports
+- installable offline-first PWA behavior for the authenticated dashboard
 
 ## Current Status
 
@@ -34,6 +35,10 @@ SpendWise is a Next.js 16 personal finance application with:
 - server-side registration validation and sanitized public error messages
 - application-wide browser security headers
 - automated tests for auth validation and public error handling
+- web app manifest, production service worker, and offline fallback route
+- IndexedDB dashboard snapshots and durable per-user mutation queues
+- optimistic income, budget, expense, and savings changes that synchronize in order
+- idempotent server replay with client-generated UUIDs
 
 ### Not fully completed yet
 
@@ -48,6 +53,8 @@ SpendWise is a Next.js 16 personal finance application with:
 | Styling | Tailwind CSS 4 |
 | Auth | Supabase Auth |
 | Database | Supabase Postgres |
+| Offline storage | IndexedDB + Cache Storage |
+| PWA runtime | Web App Manifest + Service Worker |
 | Charts | Recharts |
 | PDF export | jsPDF + jspdf-autotable |
 | Notifications | Sonner |
@@ -64,6 +71,7 @@ app/
 components/
 docs/
 lib/
+  offline/
   supabase/
 public/
 ```
@@ -73,6 +81,9 @@ Important files:
 - [app/dashboard/page.tsx](app/dashboard/page.tsx)
 - [app/dashboard/actions.ts](app/dashboard/actions.ts)
 - [components/spendwise-dashboard.tsx](components/spendwise-dashboard.tsx)
+- [lib/offline/storage.ts](lib/offline/storage.ts)
+- [lib/offline/sync.ts](lib/offline/sync.ts)
+- [public/sw.js](public/sw.js)
 - [lib/transactions.ts](lib/transactions.ts)
 - [app/(auth)/actions.ts](<app/(auth)/actions.ts>)
 - [lib/supabase/server.ts](lib/supabase/server.ts)
@@ -179,6 +190,8 @@ npm test
 | `/auth/confirm/verify` | Email verification endpoint |
 | `/auth/signout` | Sign out endpoint |
 | `/dashboard` | Protected finance workspace |
+| `/offline` | Static connectivity fallback |
+| `/manifest.webmanifest` | Generated PWA manifest |
 
 ## Dashboard Modules
 
@@ -208,6 +221,31 @@ These are currently client-side sections inside one dashboard page, not separate
 | Recent transactions | Unified server view over persisted finance rows |
 | Analytics | Backend-computed from persisted rows |
 | Reports | Backend-computed from persisted rows |
+
+The dashboard also keeps a per-user IndexedDB snapshot and an ordered mutation
+queue. Client changes are applied locally first, survive reloads, and replay
+through the authenticated Server Actions when connectivity returns. Supabase
+remains the authoritative shared data store; a rejected server validation stays
+in the local queue and is surfaced through the dashboard sync-status banner.
+
+## Offline and Installation Behavior
+
+- The app can be installed from supported browsers after it is served over HTTPS.
+- The service worker caches the static application assets, offline page, and the
+  most recently loaded authenticated dashboard document.
+- A previously loaded dashboard can continue reading and changing finance data
+  while disconnected.
+- Pending changes synchronize in creation order on reconnect and can be retried
+  from the dashboard banner.
+- Client-generated UUIDs make create operations safe to replay after an
+  interrupted response.
+- Signing out invalidates the cached private dashboard document. IndexedDB data
+  remains isolated by the authenticated user ID so pending changes are not
+  silently discarded.
+
+Service workers are registered only in production builds. Use `npm run build`
+and `npm run start` for local PWA testing; development mode is not a reliable
+offline reference.
 
 ## Validation Rules
 
@@ -258,6 +296,7 @@ For Vercel deployment:
 
 - add the same public Supabase environment variables in Vercel
 - add your production domain in Supabase redirect URLs
+- serve the deployment over HTTPS so installation and service workers are available
 - update the Supabase confirm-signup email template to use:
 
 ```txt
@@ -267,4 +306,5 @@ For Vercel deployment:
 ## Next Recommended Work
 
 1. Add edit/delete support for individual savings entries
-2. Split dashboard subviews into route-level pages if needed
+2. Add an explicit conflict-resolution screen for server-rejected offline changes
+3. Split dashboard subviews into route-level pages if needed

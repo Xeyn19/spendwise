@@ -38,19 +38,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import {
-  createBudgetAction,
-  createExpenseAction,
-  createIncomeAction,
-  createSavingsEntryAction,
-  createSavingsGoalAction,
-  deleteBudgetAction,
-  deleteExpenseAction,
-  deleteIncomeAction,
-  deleteSavingsGoalAction,
-  updateBudgetAction,
-} from "@/app/dashboard/actions";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useOfflineSync } from "@/hooks/use-offline-sync";
 import type { AnalyticsData, TrendGranularity } from "@/lib/analytics-shared";
 import { buildAnalyticsData, buildTrendData } from "@/lib/analytics-shared";
 import type { BudgetRecord } from "@/lib/budget-shared";
@@ -58,6 +47,9 @@ import type { ExpenseRecord } from "@/lib/expense-shared";
 import { normalizeCategoryKey, toExpenseTransaction } from "@/lib/expense-shared";
 import type { IncomeRecord } from "@/lib/income-shared";
 import { toIncomeTransaction } from "@/lib/income-shared";
+import type { OfflineMutationResult } from "@/lib/offline/sync";
+import { countPendingMutations, readDashboardSnapshot, writeDashboardSnapshot } from "@/lib/offline/storage";
+import { createMutation, type OfflineMutation } from "@/lib/offline/types";
 import type { MonthlyReport, ReportData } from "@/lib/reports-shared";
 import { buildReportData } from "@/lib/reports-shared";
 import type { SavingsEntryRecord, SavingsGoalRecord } from "@/lib/savings-shared";
@@ -102,6 +94,7 @@ type ModalType = "income" | "budget" | "expense" | "savings" | "contribution" | 
 type TrendFilterMode = TrendGranularity | "custom";
 
 type UserProfile = {
+  id: string;
   name: string;
   email: string;
 };
@@ -345,6 +338,7 @@ export function SpendWiseDashboard({
   initialAnalyticsData,
   initialReportData,
   todayIso,
+  serverSnapshotAt,
 }: {
   user: UserProfile;
   initialIncomes: Income[];
@@ -356,6 +350,7 @@ export function SpendWiseDashboard({
   initialAnalyticsData: AnalyticsData;
   initialReportData: ReportData;
   todayIso: string;
+  serverSnapshotAt: string;
 }) {
   const initials = React.useMemo(
     () =>
@@ -396,6 +391,115 @@ export function SpendWiseDashboard({
   const [savingsGoals, setSavingsGoals] = React.useState<SavingsGoal[]>(initialSavingsGoals);
   const [savingsEntries, setSavingsEntries] = React.useState<SavingsEntry[]>(initialSavingsEntries);
   const [transactions, setTransactions] = React.useState<Transaction[]>(() => [...initialTransactions]);
+  const [offlineHydrated, setOfflineHydrated] = React.useState(false);
+
+  const applySyncedMutation = React.useCallback(
+    (mutation: OfflineMutation, result: OfflineMutationResult) => {
+      if (mutation.type === "create-income" && "income" in result && result.income) {
+        setIncomes((current) => sortIncomes(current.map((item) => (item.id === result.income!.id ? result.income! : item))));
+      } else if (mutation.type === "create-expense" && "expense" in result && result.expense) {
+        setExpenses((current) => sortExpenses(current.map((item) => (item.id === result.expense!.id ? result.expense! : item))));
+      } else if (
+        (mutation.type === "create-budget" || mutation.type === "update-budget") &&
+        "budget" in result &&
+        result.budget
+      ) {
+        setBudgetRecords((current) =>
+          sortBudgetRecords(current.map((item) => (item.id === result.budget!.id ? result.budget! : item)))
+        );
+      } else if (mutation.type === "create-savings-goal" && "goal" in result && result.goal) {
+        setSavingsGoals((current) =>
+          sortSavingsGoals(current.map((item) => (item.id === result.goal!.id ? result.goal! : item)))
+        );
+        if (result.entry) {
+          setSavingsEntries((current) =>
+            sortSavingsEntries(current.map((item) => (item.id === result.entry!.id ? result.entry! : item)))
+          );
+        }
+      } else if (mutation.type === "create-savings-entry" && "goal" in result && result.goal && result.entry) {
+        setSavingsGoals((current) =>
+          sortSavingsGoals(current.map((item) => (item.id === result.goal!.id ? result.goal! : item)))
+        );
+        setSavingsEntries((current) =>
+          sortSavingsEntries(current.map((item) => (item.id === result.entry!.id ? result.entry! : item)))
+        );
+      }
+    },
+    []
+  );
+
+  const { enqueue, isOffline, isSyncing, pendingCount, syncError, syncNow } = useOfflineSync({
+    userId: user.id,
+    onMutationSynced: applySyncedMutation,
+  });
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    void Promise.all([readDashboardSnapshot(user.id), countPendingMutations(user.id)])
+      .then(([snapshot, queuedChanges]) => {
+        if (cancelled || !snapshot) {
+          return;
+        }
+
+        if (!navigator.onLine || queuedChanges > 0 || snapshot.savedAt > serverSnapshotAt) {
+          setIncomes(sortIncomes(snapshot.incomes));
+          setBudgetRecords(sortBudgetRecords(snapshot.budgets));
+          setExpenses(sortExpenses(snapshot.expenses));
+          setSavingsGoals(sortSavingsGoals(snapshot.savingsGoals));
+          setSavingsEntries(sortSavingsEntries(snapshot.savingsEntries));
+          setTransactions(snapshot.transactions);
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setOfflineHydrated(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [serverSnapshotAt, user.id]);
+
+  React.useEffect(() => {
+    if (!offlineHydrated) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void writeDashboardSnapshot({
+        userId: user.id,
+        savedAt: new Date().toISOString(),
+        incomes,
+        budgets: budgetRecords,
+        expenses,
+        savingsGoals,
+        savingsEntries,
+        transactions,
+      }).catch(() => undefined);
+    }, 150);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [budgetRecords, expenses, incomes, offlineHydrated, savingsEntries, savingsGoals, transactions, user.id]);
+
+  const handleSignOut = React.useCallback(() => {
+    navigator.serviceWorker?.controller?.postMessage({ type: "CLEAR_PRIVATE_CACHE" });
+  }, []);
+
+  const enqueueOrReport = React.useCallback(
+    async (mutation: OfflineMutation) => {
+      const saved = await enqueue(mutation);
+
+      if (!saved) {
+        toast.error("Could not save this change on the device.");
+      }
+
+      return saved;
+    },
+    [enqueue]
+  );
 
   const [forms, setForms] = React.useState({
     source: "",
@@ -875,29 +979,24 @@ export function SpendWiseDashboard({
       return;
     }
 
-    const formData = new FormData();
-    formData.set("source", forms.source.trim());
-    formData.set("amount", String(amount));
-    formData.set("receivedOn", forms.incomeDate);
-    formData.set("note", forms.incomeNote.trim());
+    const income: Income = {
+      id: crypto.randomUUID(),
+      source: forms.source.trim(),
+      amount,
+      date: forms.incomeDate,
+      note: forms.incomeNote.trim(),
+      createdAt: new Date().toISOString(),
+    };
 
     startIncomeMutation(async () => {
-      const result = await createIncomeAction(formData);
-
-      if (!result.success || !result.income) {
-        toast.error(result.message ?? "Could not save income.");
-        return;
-      }
-
-      const income = result.income;
-
+      if (!(await enqueueOrReport(createMutation(user.id, "create-income", income)))) return;
       setIncomes((current) => sortIncomes([income, ...current]));
       setTransactions((current) => [toIncomeTransaction(income), ...current]);
       setForms((current) => ({ ...current, source: "", incomeAmount: "", incomeNote: "" }));
       resetModal();
-      toast.success("Income saved.");
+      toast.success(isOffline ? "Income saved offline." : "Income saved. Syncing now.");
     });
-  }, [forms.incomeAmount, forms.incomeDate, forms.incomeNote, forms.source, resetModal]);
+  }, [enqueueOrReport, forms.incomeAmount, forms.incomeDate, forms.incomeNote, forms.source, isOffline, resetModal, user.id]);
 
   const saveBudget = React.useCallback(() => {
     const nextErrors: Record<string, string> = {};
@@ -914,25 +1013,22 @@ export function SpendWiseDashboard({
       return;
     }
 
-    const formData = new FormData();
-    formData.set("category", forms.budgetCategory.trim());
-    formData.set("allocatedAmount", String(amount));
-    formData.set("icon", forms.budgetIcon);
-    formData.set("periodStart", forms.budgetStartDate);
-    formData.set("periodEnd", forms.budgetEndDate);
+    const budget: StoredBudget = {
+      id: editingBudget?.id ?? crypto.randomUUID(),
+      category: forms.budgetCategory.trim(),
+      allocatedAmount: amount,
+      icon: forms.budgetIcon,
+      periodStart: forms.budgetStartDate,
+      periodEnd: forms.budgetEndDate,
+      createdAt: editingBudget?.createdAt ?? new Date().toISOString(),
+    };
 
     startBudgetMutation(async () => {
-      const result = editingBudget
-        ? await updateBudgetAction(editingBudget.id, formData)
-        : await createBudgetAction(formData);
-
-      if (!result.success || !result.budget) {
-        toast.error(result.message ?? "Could not save budget.");
-        return;
-      }
-
-      const budget = result.budget;
-
+      if (
+        !(await enqueueOrReport(
+          createMutation(user.id, editingBudget ? "update-budget" : "create-budget", budget)
+        ))
+      ) return;
       setBudgetRecords((current) =>
         sortBudgetRecords(
           editingBudget
@@ -941,7 +1037,11 @@ export function SpendWiseDashboard({
         )
       );
       resetModal();
-      toast.success(editingBudget ? "Budget updated." : "Budget saved.");
+      toast.success(
+        isOffline
+          ? `${editingBudget ? "Budget update" : "Budget"} saved offline.`
+          : `${editingBudget ? "Budget updated" : "Budget saved"}. Syncing now.`
+      );
     });
   }, [
     editingBudget,
@@ -950,8 +1050,11 @@ export function SpendWiseDashboard({
     forms.budgetEndDate,
     forms.budgetIcon,
     forms.budgetStartDate,
+    enqueueOrReport,
+    isOffline,
     resetModal,
     startBudgetMutation,
+    user.id,
   ]);
 
   const saveExpense = React.useCallback(() => {
@@ -965,35 +1068,33 @@ export function SpendWiseDashboard({
       return;
     }
 
-    const formData = new FormData();
-    formData.set("category", forms.expenseCategory.trim());
-    formData.set("amount", String(amount));
-    formData.set("spentOn", forms.expenseDate);
-    formData.set("note", forms.expenseNote.trim());
+    const expense: Expense = {
+      id: crypto.randomUUID(),
+      category: forms.expenseCategory.trim(),
+      amount,
+      date: forms.expenseDate,
+      note: forms.expenseNote.trim(),
+      createdAt: new Date().toISOString(),
+    };
 
     startExpenseMutation(async () => {
-      const result = await createExpenseAction(formData);
-
-      if (!result.success || !result.expense) {
-        toast.error(result.message ?? "Could not save expense.");
-        return;
-      }
-
-      const expense = result.expense;
-
+      if (!(await enqueueOrReport(createMutation(user.id, "create-expense", expense)))) return;
       setExpenses((current) => sortExpenses([expense, ...current]));
       setTransactions((current) => [toExpenseTransaction(expense), ...current]);
       setForms((current) => ({ ...current, expenseCategory: "", expenseAmount: "", expenseNote: "" }));
       resetModal();
-      toast.success("Expense saved.");
+      toast.success(isOffline ? "Expense saved offline." : "Expense saved. Syncing now.");
     });
   }, [
     forms.expenseAmount,
     forms.expenseCategory,
     forms.expenseDate,
     forms.expenseNote,
+    enqueueOrReport,
+    isOffline,
     resetModal,
     startExpenseMutation,
+    user.id,
   ]);
 
   const saveSavingsGoal = React.useCallback(() => {
@@ -1009,25 +1110,36 @@ export function SpendWiseDashboard({
       return;
     }
 
-    const formData = new FormData();
-    formData.set("name", forms.goalName.trim());
-    formData.set("targetAmount", String(target));
-    formData.set("initialSaved", String(saved || 0));
-    formData.set("entryDate", forms.savingsEntryDate);
+    const goal: SavingsGoal = {
+      id: crypto.randomUUID(),
+      name: forms.goalName.trim(),
+      targetAmount: target,
+      savedAmount: saved,
+      remainingAmount: Math.max(0, target - saved),
+      createdAt: new Date().toISOString(),
+    };
+    const initialEntry: SavingsEntry | undefined = saved > 0
+      ? {
+          id: crypto.randomUUID(),
+          goalId: goal.id,
+          goalName: goal.name,
+          type: "contribution",
+          amount: saved,
+          date: forms.savingsEntryDate,
+          note: "Initial savings",
+          createdAt: goal.createdAt,
+        }
+      : undefined;
 
     startSavingsMutation(async () => {
-      const result = await createSavingsGoalAction(formData);
+      if (
+        !(await enqueueOrReport(createMutation(user.id, "create-savings-goal", { goal, initialEntry })))
+      ) return;
+      setSavingsGoals((current) => sortSavingsGoals([goal, ...current]));
 
-      if (!result.success || !result.goal) {
-        toast.error(result.message ?? "Could not save savings goal.");
-        return;
-      }
-
-      setSavingsGoals((current) => sortSavingsGoals([result.goal!, ...current]));
-
-      if (result.entry) {
-        setSavingsEntries((current) => sortSavingsEntries([result.entry!, ...current]));
-        setTransactions((current) => [toSavingsTransaction(result.entry!), ...current]);
+      if (initialEntry) {
+        setSavingsEntries((current) => sortSavingsEntries([initialEntry, ...current]));
+        setTransactions((current) => [toSavingsTransaction(initialEntry), ...current]);
       }
 
       setForms((current) => ({
@@ -1038,16 +1150,19 @@ export function SpendWiseDashboard({
         savingsEntryDate: todayIso,
       }));
       resetModal();
-      toast.success("Savings goal saved.");
+      toast.success(isOffline ? "Savings goal saved offline." : "Savings goal saved. Syncing now.");
     });
   }, [
     forms.goalName,
     forms.initialSaved,
     forms.savingsEntryDate,
     forms.targetAmount,
+    enqueueOrReport,
+    isOffline,
     resetModal,
     startSavingsMutation,
     todayIso,
+    user.id,
   ]);
 
   const saveSavingsEntry = React.useCallback(() => {
@@ -1061,28 +1176,37 @@ export function SpendWiseDashboard({
       setErrors({ savingsEntryDate: "Date is required." });
       return;
     }
+    if (forms.savingsEntryType === "withdrawal" && amount > contributionGoal.savedAmount) {
+      setErrors({ contributionAmount: "Withdrawal cannot be greater than the current saved amount." });
+      return;
+    }
 
-    const formData = new FormData();
-    formData.set("type", forms.savingsEntryType);
-    formData.set("amount", String(amount));
-    formData.set("entryDate", forms.savingsEntryDate);
-    formData.set("note", forms.savingsEntryNote.trim());
+    const entry: SavingsEntry = {
+      id: crypto.randomUUID(),
+      goalId: contributionGoal.id,
+      goalName: contributionGoal.name,
+      type: forms.savingsEntryType as SavingsEntry["type"],
+      amount,
+      date: forms.savingsEntryDate,
+      note: forms.savingsEntryNote.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    const signedAmount = entry.type === "withdrawal" ? -entry.amount : entry.amount;
+    const updatedGoal: SavingsGoal = {
+      ...contributionGoal,
+      savedAmount: contributionGoal.savedAmount + signedAmount,
+      remainingAmount: Math.max(0, contributionGoal.targetAmount - contributionGoal.savedAmount - signedAmount),
+    };
 
     startSavingsMutation(async () => {
-      const result = await createSavingsEntryAction(contributionGoal.id, formData);
-
-      if (!result.success || !result.goal || !result.entry) {
-        toast.error(result.message ?? "Could not save savings entry.");
-        return;
-      }
-
+      if (!(await enqueueOrReport(createMutation(user.id, "create-savings-entry", entry)))) return;
       setSavingsGoals((current) =>
         sortSavingsGoals(
-          current.map((goal) => (goal.id === result.goal!.id ? result.goal! : goal))
+          current.map((goal) => (goal.id === updatedGoal.id ? updatedGoal : goal))
         )
       );
-      setSavingsEntries((current) => sortSavingsEntries([result.entry!, ...current]));
-      setTransactions((current) => [toSavingsTransaction(result.entry!), ...current]);
+      setSavingsEntries((current) => sortSavingsEntries([entry, ...current]));
+      setTransactions((current) => [toSavingsTransaction(entry), ...current]);
       setForms((current) => ({
         ...current,
         contributionAmount: "",
@@ -1091,9 +1215,9 @@ export function SpendWiseDashboard({
       }));
       resetModal();
       toast.success(
-        forms.savingsEntryType === "withdrawal"
-          ? "Savings withdrawal saved."
-          : "Savings contribution saved."
+        isOffline
+          ? `Savings ${forms.savingsEntryType} saved offline.`
+          : `Savings ${forms.savingsEntryType} saved. Syncing now.`
       );
     });
   }, [
@@ -1102,67 +1226,48 @@ export function SpendWiseDashboard({
     forms.savingsEntryDate,
     forms.savingsEntryNote,
     forms.savingsEntryType,
+    enqueueOrReport,
+    isOffline,
     resetModal,
     startSavingsMutation,
     todayIso,
+    user.id,
   ]);
 
   const deleteIncome = React.useCallback((income: Income) => {
     startIncomeMutation(async () => {
-      const result = await deleteIncomeAction(income.id);
-
-      if (!result.success) {
-        toast.error(result.message ?? "Could not delete income.");
-        return;
-      }
-
+      if (!(await enqueueOrReport(createMutation(user.id, "delete-income", { id: income.id })))) return;
       setIncomes((current) => current.filter((item) => item.id !== income.id));
       setTransactions((current) => current.filter((transaction) => transaction.id !== `income-${income.id}`));
       setDeleteTarget(null);
-      toast.success("Income deleted.");
+      toast.success(isOffline ? "Income deletion saved offline." : "Income deleted. Syncing now.");
     });
-  }, [startIncomeMutation]);
+  }, [enqueueOrReport, isOffline, startIncomeMutation, user.id]);
 
   const deleteExpense = React.useCallback((expense: Expense) => {
     startExpenseMutation(async () => {
-      const result = await deleteExpenseAction(expense.id);
-
-      if (!result.success) {
-        toast.error(result.message ?? "Could not delete expense.");
-        return;
-      }
-
+      if (!(await enqueueOrReport(createMutation(user.id, "delete-expense", { id: expense.id })))) return;
       setExpenses((current) => current.filter((item) => item.id !== expense.id));
       setTransactions((current) => current.filter((transaction) => transaction.id !== `expense-${expense.id}`));
       setDeleteTarget(null);
-      toast.success("Expense deleted.");
+      toast.success(isOffline ? "Expense deletion saved offline." : "Expense deleted. Syncing now.");
     });
-  }, [startExpenseMutation]);
+  }, [enqueueOrReport, isOffline, startExpenseMutation, user.id]);
 
   const deleteBudget = React.useCallback((budget: Budget) => {
     startBudgetMutation(async () => {
-      const result = await deleteBudgetAction(budget.id);
-
-      if (!result.success) {
-        toast.error(result.message ?? "Could not delete budget.");
-        return;
-      }
-
+      if (!(await enqueueOrReport(createMutation(user.id, "delete-budget", { id: budget.id })))) return;
       setBudgetRecords((current) => current.filter((item) => item.id !== budget.id));
       setDeleteTarget(null);
-      toast.success("Budget deleted.");
+      toast.success(isOffline ? "Budget deletion saved offline." : "Budget deleted. Syncing now.");
     });
-  }, []);
+  }, [enqueueOrReport, isOffline, user.id]);
 
   const deleteSavingsGoal = React.useCallback((goal: SavingsGoal) => {
     startSavingsMutation(async () => {
-      const result = await deleteSavingsGoalAction(goal.id);
-
-      if (!result.success) {
-        toast.error(result.message ?? "Could not delete savings goal.");
-        return;
-      }
-
+      if (
+        !(await enqueueOrReport(createMutation(user.id, "delete-savings-goal", { id: goal.id })))
+      ) return;
       setSavingsGoals((current) => current.filter((item) => item.id !== goal.id));
       setSavingsEntries((current) => current.filter((entry) => entry.goalId !== goal.id));
       setTransactions((current) =>
@@ -1174,9 +1279,9 @@ export function SpendWiseDashboard({
         })
       );
       setDeleteTarget(null);
-      toast.success("Savings goal deleted.");
+      toast.success(isOffline ? "Savings goal deletion saved offline." : "Savings goal deleted. Syncing now.");
     });
-  }, [savingsEntries, startSavingsMutation]);
+  }, [enqueueOrReport, isOffline, savingsEntries, startSavingsMutation, user.id]);
 
   const renderDeleteConfirm = React.useCallback(
     (target: string, onYes: () => void) =>
@@ -1299,7 +1404,7 @@ export function SpendWiseDashboard({
                     >
                       Settings
                     </button>
-                    <form action="/auth/signout" method="post">
+                    <form action="/auth/signout" method="post" onSubmit={handleSignOut}>
                       <button className="w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-red-600 hover:bg-red-50">
                         Logout
                       </button>
@@ -1310,6 +1415,38 @@ export function SpendWiseDashboard({
             </div>
           </div>
         </header>
+
+        {isOffline || isSyncing || pendingCount > 0 || syncError ? (
+          <div
+            role="status"
+            className={cx(
+              "flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5 text-sm font-semibold sm:px-6 lg:px-8",
+              syncError
+                ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-100"
+                : "border-primary/20 bg-primary/10 text-emerald-950 dark:border-emerald-400/20 dark:text-emerald-100"
+            )}
+          >
+            <span>
+              {syncError
+                ? syncError
+                : isOffline
+                  ? `Offline. ${pendingCount > 0 ? `${pendingCount} change${pendingCount === 1 ? "" : "s"} saved on this device.` : "You can keep using SpendWise."}`
+                  : isSyncing
+                    ? `Syncing ${pendingCount} pending change${pendingCount === 1 ? "" : "s"}…`
+                    : `${pendingCount} change${pendingCount === 1 ? "" : "s"} waiting to sync.`}
+            </span>
+            {!isOffline && (syncError || pendingCount > 0) ? (
+              <button
+                type="button"
+                className="rounded-lg border border-current/25 px-3 py-1 text-xs font-bold hover:bg-black/5 dark:hover:bg-white/10"
+                onClick={() => void syncNow()}
+                disabled={isSyncing}
+              >
+                {isSyncing ? "Syncing…" : "Retry sync"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         <main className="px-4 py-6 sm:px-6 lg:px-8">
           <div key={activePage} className="animate-in fade-in duration-200">
